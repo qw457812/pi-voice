@@ -210,9 +210,10 @@ export function createPiVoiceRuntime(
         void runExclusive(ctx, () => cancelRecording(ctx));
         return { consume: true };
       }
-      if (dictation?.state.phase === "transcribing") {
+      if (dictation?.state.phase === "starting" || dictation?.state.phase === "transcribing") {
+        const message = dictation.state.phase === "starting" ? "Recording cancelled" : "Transcription cancelled";
         void dictation.cancel();
-        ctx.ui.notify("Transcription cancelled", "info");
+        ctx.ui.notify(message, "info");
         return { consume: true };
       }
       if (dictation?.state.phase === "cancelling") return { consume: true };
@@ -336,7 +337,9 @@ export function createPiVoiceRuntime(
       // Paint startup feedback before opening the native device blocks the loop.
       await new Promise<void>((resolve) => setImmediate(resolve));
       if (shuttingDown) return;
-      await controller.start(configured);
+      const starting = controller.start(configured);
+      listenForCancel(ctx);
+      await starting;
       if (controller.state.phase !== "listening") {
         await reportDictationError(ctx, controller);
         return;
@@ -350,7 +353,6 @@ export function createPiVoiceRuntime(
       });
       meter.setModelState(controller.modelState);
       recording = { dictation: controller, meter };
-      listenForCancel(ctx);
     } catch (error) {
       recording = undefined;
       meter.stop();
@@ -358,6 +360,7 @@ export function createPiVoiceRuntime(
       ctx.ui.notify(`Recording failed to start: ${error instanceof Error ? error.message : String(error)}`, "error");
     } finally {
       if (recording?.dictation !== controller) {
+        clearCancelListener();
         await controller.dispose();
         if (dictation === controller) dictation = undefined;
       }
@@ -380,7 +383,8 @@ export function createPiVoiceRuntime(
     const { clearTranscribeWidget, showTranscribeStatus } = await loadVisualizer();
     await loadSettingsOnce();
     if (settings && existsSync(settings.model.path)) {
-      showTranscribeStatus(ctx, "Starting microphone…");
+      const cancelKeys = new VoiceKeys(getKeybindings()).keyText("voice.dictation.cancel");
+      showTranscribeStatus(ctx, "Starting microphone…", { cancelKeys });
     } else {
       // Setup panes replace only the editor, so a status line set here or by
       // the first-press handler in index.ts would sit above every setup step.

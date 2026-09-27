@@ -71,7 +71,7 @@ export async function chooseMicrophone(
 ): Promise<MicrophoneSetting | undefined> {
   let devices: string[] = [];
   try {
-    devices = getAvailableMicrophones();
+    devices = await getAvailableMicrophones();
   } catch (error) {
     ctx.ui.notify(
       `Could not list microphones: ${error instanceof Error ? error.message : String(error)}`,

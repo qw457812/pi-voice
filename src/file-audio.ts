@@ -21,6 +21,8 @@ function ffmpegConfiguration(): FfmpegConfiguration {
 
 function installHint(): string {
   switch (process.platform) {
+    case "android":
+      return "On Termux: pkg install ffmpeg";
     case "darwin":
       return "On macOS with Homebrew: brew install ffmpeg";
     case "win32":

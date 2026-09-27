@@ -1,11 +1,16 @@
-import { PvRecorder } from "@picovoice/pvrecorder-node";
+import type { PvRecorder } from "@picovoice/pvrecorder-node";
 import { execFile } from "node:child_process";
+import { createRequire } from "node:module";
 import { promisify } from "node:util";
 import { CAPTURE_SAMPLE_RATE } from "./audio-constants.js";
+import type { DictationCapture } from "./dictation-controller.js";
+import { MicrophoneUnavailableError } from "./microphone-error.js";
 import { convertFrames } from "./pcm.js";
+import { getPulseMicrophones, PulseAudioCapture } from "./pulse-audio.js";
 import type { MicrophoneSetting } from "./settings.js";
 
 export { CAPTURE_SAMPLE_RATE } from "./audio-constants.js";
+export { MicrophoneUnavailableError } from "./microphone-error.js";
 
 const FRAME_LENGTH = 512;
 
@@ -20,15 +25,16 @@ type SelectedMicrophone = {
   occurrence: number;
 };
 
-export class MicrophoneUnavailableError extends Error {
-  constructor(name: string) {
-    super(`Selected microphone is unavailable: ${name}. Open /voice-settings and choose another microphone.`);
-    this.name = "MicrophoneUnavailableError";
-  }
+function recorderClass(): typeof PvRecorder {
+  // Loading PvRecorder itself throws on Android; only desktop capture may load it.
+  const require = createRequire(import.meta.url);
+  return (require("@picovoice/pvrecorder-node") as typeof import("@picovoice/pvrecorder-node")).PvRecorder;
 }
 
-export function getAvailableMicrophones(): string[] {
-  return PvRecorder.getAvailableDevices();
+export async function getAvailableMicrophones(): Promise<string[]> {
+  return process.platform === "android"
+    ? getPulseMicrophones()
+    : recorderClass().getAvailableDevices();
 }
 
 function toError(value: unknown): Error {
@@ -101,8 +107,10 @@ function findDeviceIndex(devices: readonly string[], selected: SelectedMicrophon
   return -1;
 }
 
-export function createMicrophoneCapture(microphone: MicrophoneSetting): MicrophoneCapture {
-  return new MicrophoneCapture(microphone.type === "device" ? microphone : undefined);
+export function createMicrophoneCapture(microphone: MicrophoneSetting): DictationCapture {
+  return process.platform === "android"
+    ? new PulseAudioCapture(microphone)
+    : new MicrophoneCapture(microphone.type === "device" ? microphone : undefined);
 }
 
 export class MicrophoneCapture {
@@ -118,8 +126,9 @@ export class MicrophoneCapture {
   start(): void {
     if (this.recorder) throw new Error("Microphone capture is already active");
 
+    const PvRecorder = recorderClass();
     const deviceIndex = this.selectedDevice
-      ? findDeviceIndex(getAvailableMicrophones(), this.selectedDevice)
+      ? findDeviceIndex(PvRecorder.getAvailableDevices(), this.selectedDevice)
       : -1;
     if (this.selectedDevice && deviceIndex < 0) {
       throw new MicrophoneUnavailableError(this.selectedDevice.name);

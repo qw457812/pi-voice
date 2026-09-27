@@ -5,7 +5,7 @@ import type { DictationReservation, TranscriptionService } from "./transcription
 
 export type DictationCapture = {
   onFrame?: (frame: Int16Array) => void;
-  start(): void;
+  start(): void | Promise<void>;
   stop(): Promise<{ pcm: Float32Array }>;
 };
 export type DictationResult = { text: string; speechSeconds: number; transcribeSeconds: number };
@@ -106,7 +106,7 @@ export class DictationController {
     const take = this.take;
     if (!take) return Promise.resolve();
     this.setState({ phase: "starting" });
-    const work = this.cleanup.then(() => {
+    const work = this.cleanup.then(async () => {
       if (this.disposed || this.take !== take) return;
       try {
         const capture = this.options.createCapture(settings.microphone);
@@ -115,14 +115,18 @@ export class DictationController {
           take.chunker.push(frame);
           try { this.options.onFrame?.(frame); } catch { /* Audio is already fed. */ }
         };
-        capture.start();
+        // Publish ownership before awaiting startup, so cancellation can stop it.
         take.capture = capture;
+        await capture.start();
+        if (this.disposed || this.take !== take || take.abort.signal.aborted) return;
         this.startedAt = this.now();
         this.setState({ phase: "listening" });
       } catch (cause) {
-        this.take = undefined;
         take.chunker.discard();
         take.reservation.cancel();
+        await this.stopCapture(take).catch(() => undefined);
+        if (this.disposed || this.take !== take) return;
+        this.take = undefined;
         this.setState({ phase: "error", stage: "capture", cause });
       }
     });
@@ -135,10 +139,11 @@ export class DictationController {
     const capture = take.capture;
     take.capture = undefined;
     if (!capture) return Promise.resolve({ pcm: new Float32Array() });
-    capture.onFrame = undefined;
-    // Normalize synchronous failures too; native implementations normally reject.
+    // Keep feeding until the source has drained, including the final pipe read.
+    // Cancellation is already guarded by the take identity and abort signal.
     try { take.stopping = capture.stop(); }
     catch (error) { take.stopping = Promise.reject(error); }
+    take.stopping = take.stopping.finally(() => { capture.onFrame = undefined; });
     return take.stopping;
   }
 

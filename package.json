@@ -16,6 +16,8 @@
     "src",
     "index.ts",
     "catalog/recommendations.json",
+    "scripts/setup-termux.mjs",
+    "scripts/check-native.mjs",
     "README.md",
     "LICENSE"
   ],
@@ -37,6 +39,8 @@
     "check": "tsc --noEmit",
     "test": "npm run check && node scripts/run-tests.mjs",
     "prepublishOnly": "npm test",
+    "termux:setup": "node scripts/setup-termux.mjs",
+    "termux:check": "node scripts/check-native.mjs",
     "catalog:generate": "node scripts/generate-catalog.mjs",
     "recommendations:generate": "node scripts/generate-recommendations.mjs",
     "catalog:verify": "node scripts/catalog-metadata.mjs",
