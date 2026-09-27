@@ -16,6 +16,7 @@
     "src",
     "index.ts",
     "catalog/recommendations.json",
+    "docs",
     "scripts/setup-termux.mjs",
     "scripts/check-native.mjs",
     "README.md",

@@ -11,7 +11,7 @@ const execFileAsync = promisify(execFile);
 const START_TIMEOUT_MS = 5_000;
 const STOP_TIMEOUT_MS = 2_000;
 const MAX_STDERR_CHARS = 8 * 1024;
-const SETUP_HELP = "In Termux, install pulseaudio, run pulseaudio --start, and load module-sles-source with pactl after granting microphone permission via Termux:API. See the README Termux section.";
+const SETUP_HELP = "In Termux, install pulseaudio, run pulseaudio --start, and load module-sles-source with pactl after granting microphone permission via Termux:API. See docs/termux.md.";
 
 function toError(value: unknown): Error {
   return value instanceof Error ? value : new Error(String(value));
