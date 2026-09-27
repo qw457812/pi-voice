@@ -6,7 +6,7 @@ For installation, see [Termux setup](termux.md). This guide does not automatical
 
 ## Keep the downstream patch small
 
-- Put PulseAudio-specific behavior in `src/pulse-audio.ts` and native build/check logic in `scripts/*-termux.mjs` / `scripts/check-native.mjs`. Do not copy upstream's transcription service, model catalog, or desktop recorder into a second implementation.
+- Put PulseAudio process handling in `src/pulse-audio.ts`, pure source parsing/selection in `src/pulse-sources.ts`, and native build/check logic in `scripts/*-termux.mjs` / `scripts/check-native.mjs`. Do not copy upstream's transcription service, model catalog, or desktop recorder into a second implementation.
 - Keep platform selection at the audio boundary. The controller's async capture contract is platform-neutral; avoid Android checks in the controller or runtime.
 - Keep downstream regression tests in separate files, reusing upstream test helpers. Do not reorganize upstream tests merely to accommodate the fork.
 - Keep setup and maintenance details here under `docs/`; README needs only a link.
@@ -19,7 +19,7 @@ These differences are intentional. During conflicts, preserve the behavior, not 
 
 | File | Required behavior | Regression coverage |
 | --- | --- | --- |
-| `src/audio.ts` | Do not load PvRecorder on Android; select PulseAudio there; allow async device discovery. Preserve desktop recording. | `test/pulse-audio.test.ts`, plus platform smoke tests |
+| `src/audio.ts` | Do not load PvRecorder on Android; select PulseAudio there; allow async device discovery. Preserve desktop recording. | `test/pulse-sources.test.ts`, `test/pulse-audio.test.ts`, plus platform smoke tests |
 | `src/microphone-picker.ts` | Await device discovery and retain its error reporting. | Microphone selection smoke test |
 | `src/dictation-controller.ts` | Own the capture before awaiting startup; cancel or clean up failed startup; ignore stale readiness; feed drained PCM before finishing the stream. | `test/dictation-async-capture.test.ts`, upstream controller tests |
 | `src/runtime.ts` | Register cancellation during startup, bypass the operation lock for that cancellation, and remove listeners on exit. | `test/runtime.test.ts` |

@@ -16,7 +16,7 @@ pkg install nodejs git clang cmake ninja pulseaudio
 pkg install ffmpeg
 ```
 
-Install the **Termux:API Android app from the same source as Termux** and grant its microphone permission in Android settings. The command-line `termux-api` package alone does not grant permission. PulseAudio captures the audio; Pi Voice does not invoke `termux-microphone-record`.
+For traditional Termux builds that share an Android UID with their plugins, install the **Termux:API Android app from the same source as Termux** and grant it microphone permission in Android settings. [Termux maintainers explain](https://github.com/termux/termux-app/issues/2871#issuecomment-1719024276) that this propagates microphone permission to Termux, allowing PulseAudio's `module-sles-source` to capture through OpenSL ES. The command-line `termux-api` package alone does not grant permission. PulseAudio captures the audio; Pi Voice does not invoke `termux-microphone-record`. Other Termux distributions may handle permissions differently; if the source fails to initialize or returns no audio, check that distribution's microphone permissions.
 
 ```bash
 pulseaudio --start

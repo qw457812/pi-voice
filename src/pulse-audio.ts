@@ -3,15 +3,14 @@ import { promisify } from "node:util";
 import { CAPTURE_SAMPLE_RATE } from "./audio-constants.js";
 import { Deferred } from "./deferred.js";
 import type { DictationCapture } from "./dictation-controller.js";
-import { MicrophoneUnavailableError } from "./microphone-error.js";
 import { convertFrames } from "./pcm.js";
+import { parsePulseMicrophones, selectPulseMicrophone, SETUP_HELP } from "./pulse-sources.js";
 import type { MicrophoneSetting } from "./settings.js";
 
 const execFileAsync = promisify(execFile);
 const START_TIMEOUT_MS = 5_000;
 const STOP_TIMEOUT_MS = 2_000;
 const MAX_STDERR_CHARS = 8 * 1024;
-const SETUP_HELP = "In Termux, install pulseaudio, run pulseaudio --start, and load module-sles-source with pactl after granting microphone permission via Termux:API. See docs/termux.md.";
 
 function toError(value: unknown): Error {
   return value instanceof Error ? value : new Error(String(value));
@@ -32,29 +31,16 @@ async function pactl(args: string[], signal?: AbortSignal): Promise<string> {
 }
 
 export async function getPulseMicrophones(signal?: AbortSignal): Promise<string[]> {
-  const sources: unknown = JSON.parse(await pactl(["--format=json", "list", "sources"], signal));
-  if (!Array.isArray(sources)) throw new Error("PulseAudio returned an invalid source list.");
-  return sources.filter((source) =>
-    source && typeof source.name === "string" &&
-    !source.name.endsWith(".monitor") && !source.monitor_source &&
-    source.properties?.["device.class"] !== "monitor",
-  ).map((source) => source.name as string);
+  return parsePulseMicrophones(await pactl(["--format=json", "list", "sources"], signal));
 }
 
 async function selectSource(microphone: MicrophoneSetting, signal: AbortSignal): Promise<string> {
   const sources = await getPulseMicrophones(signal);
-  if (microphone.type === "device") {
-    if (microphone.occurrence !== 0 || !sources.includes(microphone.name)) {
-      throw new MicrophoneUnavailableError(microphone.name);
-    }
-    return microphone.name;
-  }
-  if (sources.length === 0) throw new Error(`PulseAudio has no microphone source. ${SETUP_HELP}`);
-  const defaultSource = (await pactl(["get-default-source"], signal)).trim();
-  if (sources.includes(defaultSource)) return defaultSource;
-  // Termux may default to the speaker monitor even with one real input loaded.
-  if (sources.length === 1) return sources[0]!;
-  throw new Error("The default PulseAudio source is not a microphone. Open /voice-settings and choose an input.");
+  // Explicit selections and empty lists never need a default-source query.
+  const defaultSource = microphone.type === "system-default" && sources.length > 0
+    ? await pactl(["get-default-source"], signal)
+    : undefined;
+  return selectPulseMicrophone(sources, microphone, defaultSource);
 }
 
 type CaptureRun = {
@@ -109,7 +95,10 @@ export class PulseAudioCapture implements DictationCapture {
           run.error ??= new Error(`PulseAudio recording ended unexpectedly (${signal ?? code}): ${run.stderr.trim() || "no diagnostic output"}. ${SETUP_HELP}`);
         }
         if (run.pending.length) run.error ??= new Error("parec returned an incomplete Int16 PCM sample");
-        run.ready.reject(run.error ?? new Error("Recording stopped before any audio arrived"));
+        // A normal stop after the first PCM sample must not change startup's outcome.
+        if (!run.ready.settled) {
+          run.ready.reject(run.error ?? new Error("Recording stopped before any audio arrived"));
+        }
         run.closed.resolve();
       });
       run.startTimer = setTimeout(() => {

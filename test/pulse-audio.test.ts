@@ -17,6 +17,7 @@ type FixtureOptions = {
   sources?: unknown;
   defaultSource?: string;
   queryError?: boolean;
+  defaultQueryError?: boolean;
   slowQuery?: boolean;
   mode?: "record" | "error" | "no-audio" | "odd" | "exit" | "ignore-stop";
 };
@@ -38,7 +39,9 @@ async function fixture(t: TestContext, options: FixtureOptions = {}) {
   };
   const preamble = `#!${process.execPath}\nconst fs = require("node:fs");\nconst config = ${JSON.stringify(configuration)};\n`;
   await writeFile(join(directory, "pactl"), preamble + `
-if (config.queryError) { console.error("Connection refused"); process.exit(1); }
+if (config.queryError || (config.defaultQueryError && process.argv[2] === "get-default-source")) {
+  console.error("Connection refused"); process.exit(1);
+}
 const output = () => console.log(process.argv[2] === "get-default-source"
   ? config.defaultSource : JSON.stringify(config.sources));
 if (config.slowQuery) setTimeout(output, 60000);
@@ -129,6 +132,26 @@ test("multiple inputs never silently select a speaker monitor", unixOnly, async 
     sources: [monitor, input, { ...input, name: "other-input" }], defaultSource: monitor.name,
   });
   await assert.rejects(capture.start(), /choose an input/);
+  assert.equal(existsSync(calls), false);
+});
+
+test("explicit selections do not query the PulseAudio default", unixOnly, async (t) => {
+  await fixture(t, { defaultQueryError: true });
+  const capture = new PulseAudioCapture({ type: "device", name: input.name, occurrence: 0 });
+  t.after(() => capture.stop().catch(() => {}));
+  await capture.start();
+  await capture.stop();
+});
+
+test("empty input lists do not query the PulseAudio default", unixOnly, async (t) => {
+  const { capture, calls } = await fixture(t, { sources: [], defaultQueryError: true });
+  await assert.rejects(capture.start(), /no microphone source/);
+  assert.equal(existsSync(calls), false);
+});
+
+test("default query errors are not bypassed even for a sole microphone", unixOnly, async (t) => {
+  const { capture, calls } = await fixture(t, { sources: [input], defaultQueryError: true });
+  await assert.rejects(capture.start(), /Could not query PulseAudio.*Connection refused/s);
   assert.equal(existsSync(calls), false);
 });
 
