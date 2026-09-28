@@ -1,4 +1,6 @@
 import { readFile, rename, unlink, writeFile } from "node:fs/promises";
+import { homedir } from "node:os";
+import { join, sep } from "node:path";
 import {
   languageIdentity,
   getCatalogModel,
@@ -112,6 +114,10 @@ export function transcriptionLanguageForModel(
   return defaultTranscriptionLanguage(model, preferredLanguages);
 }
 
+function expandHomePath(path: string): string {
+  return path === "~" ? homedir() : path.startsWith(`~${sep}`) ? join(homedir(), path.slice(2)) : path;
+}
+
 function validateSettings(value: unknown): TranscribeSettings | undefined {
   if (!isObject(value) || value.version !== SETTINGS_VERSION) return undefined;
   if (!isObject(value.backend) || value.backend.type !== "transcribe-cpp") return undefined;
@@ -143,7 +149,7 @@ function validateSettings(value: unknown): TranscribeSettings | undefined {
     model: {
       source: "catalog",
       id: value.model.id,
-      path: value.model.path,
+      path: expandHomePath(value.model.path),
     },
   };
 }
