@@ -30,6 +30,11 @@ try {
     join(process.cwd(), "src/model-ratings-help.md"),
     join(outputDirectory, "src/model-ratings-help.md"),
   );
+  // The native path helper is shared with the standalone Node setup scripts.
+  await copyFile(
+    join(process.cwd(), "src/termux-native-paths.mjs"),
+    join(outputDirectory, "src/termux-native-paths.mjs"),
+  );
   const testDirectory = join(outputDirectory, "test");
   const testFiles = (await readdir(testDirectory))
     .filter((name) => name.endsWith(".test.js"))

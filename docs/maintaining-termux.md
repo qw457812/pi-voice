@@ -7,7 +7,7 @@ For installation, see [Termux setup](termux.md). This guide does not automatical
 ## Keep the downstream patch small
 
 - Put PulseAudio process handling in `src/pulse-audio.ts`, pure source parsing/selection in `src/pulse-sources.ts`, and native build/check logic in `scripts/*-termux.mjs` / `scripts/check-native.mjs`. Do not copy upstream's transcription service, model catalog, or desktop recorder into a second implementation.
-- Keep platform selection at the audio boundary. The controller's async capture contract is platform-neutral; avoid Android checks in the controller or runtime.
+- Keep platform selection at the audio/native-loading boundaries. `src/termux-native.ts` handles automatic library discovery; `postinstall` invokes the standalone build helper only on Android arm64. Do not add setup commands or runtime build/recovery flows. `src/termux-native-paths.mjs` is shared by runtime and standalone scripts, with types in the adjacent `.d.mts`. The controller's async capture contract is platform-neutral; avoid Android checks in the controller or runtime.
 - Keep downstream regression tests in separate files, reusing upstream test helpers. Do not reorganize upstream tests merely to accommodate the fork.
 - Keep setup and maintenance details here under `docs/`; README needs only a link.
 - Keep feature changes, dependency upgrades, and unrelated cleanup in separate future commits. Do not rewrite existing published commits to split them.
@@ -24,9 +24,11 @@ These differences are intentional. During conflicts, preserve the behavior, not 
 | `src/dictation-controller.ts` | Own the capture before awaiting startup; cancel or clean up failed startup; ignore stale readiness; feed drained PCM before finishing the stream. | `test/dictation-async-capture.test.ts`, upstream controller tests |
 | `src/runtime.ts` | Register cancellation during startup, bypass the operation lock for that cancellation, and remove listeners on exit. | `test/runtime.test.ts` |
 | `src/file-audio.ts` | Give the Termux FFmpeg install hint. | `test/file-audio.test.ts`, missing-FFmpeg smoke test |
-| `package.json` / `package-lock.json` | Preserve upstream dependencies while retaining a working Android Koffi addon, setup/check commands, and packaged docs/scripts. | Clean npm install, package dry run, native check |
+| `src/transcription.ts` | Use the native-loading boundary before importing the binding; preserve explicit library overrides and desktop behavior. | `test/termux-native.test.ts`, native smoke check |
+| `scripts/run-tests.mjs` | Copy the shared `.mjs` path helper alongside compiled tests. | Full test run |
+| `package.json` / `package-lock.json` | Declare the Android-compatible Koffi minimum, preserve the Android-arm64-only postinstall hook, and package its scripts and path helper. | `test/termux-setup-script.test.ts`, clean package install, native check |
 
-Keep `.termux/` ignored. It contains machine-specific generated builds and libraries, not portable source files.
+Native caches now live outside the package under `$XDG_CACHE_HOME/pi-voice/native` (default `~/.cache/pi-voice/native`). Keep `.termux/` ignored for older developer builds; neither location belongs in version control.
 
 ## Sync upstream
 
@@ -72,9 +74,9 @@ Updating `main` is optional and independent of testing the fork. In the worktree
 
 ## Dependencies and lockfile conflicts
 
-Merge `package.json` first. Accept upstream's intended dependency changes rather than freezing `transcribe-cpp` at the original fork version. Koffi is transitive: the old 3.1.4 lock entry did not support Android; 3.3.1 passed this fork's initial native checks. Do not assume a future version works without checking it on Termux.
+Merge `package.json` first. Accept upstream's intended dependency changes rather than freezing `transcribe-cpp` at the original fork version. This fork directly declares Koffi `^3.3.1`, the validated minimum, because npm package consumers do not inherit the repository lockfile. The old 3.1.4 lock entry did not support Android. Do not assume a future version works without checking it on Termux.
 
-If `package-lock.json` conflicts, reconstruct it deliberately from upstream's lockfile plus the merged manifest and any fork-only dependency requirements. For the current fork, the only lockfile-specific requirement is an Android-capable Koffi:
+If `package-lock.json` conflicts, reconstruct it deliberately from upstream's lockfile plus the merged manifest, including the direct Koffi requirement:
 
 ```bash
 # Only for a conflicted lockfile, after resolving package.json:
@@ -86,27 +88,29 @@ git diff -- package.json package-lock.json
 git add package.json package-lock.json
 ```
 
-Review unexpected dependency churn; avoid a blanket `npm update` or deleting the entire lockfile. If upstream already resolves a working Android addon, drop the obsolete downstream lockfile difference. If `transcribe-cpp` changes its Koffi dependency range, review compatibility rather than adding an unverified override.
+Review unexpected dependency churn; avoid a blanket `npm update` or deleting the entire lockfile. Remove the direct Koffi requirement only if the upstream binding's dependency range itself guarantees a working Android version, not merely because its current lockfile resolves one. npm can nest incompatible dependency versions, so setup checks the Koffi actually resolved from the binding. If that copy is too old, fix the dependency graph rather than bypassing the check or adding an unverified override.
 
 ## Rebuilding after a native dependency change
 
-After installing the merged dependencies, read the binding version and use matching C++ sources. Do not infer it from the previous build or hard-code the initial 0.2.4 release:
+On Android arm64, normal installation runs the native build/check helper through `postinstall`. After updating the native binding, restart Pi. If lifecycle scripts were disabled, run the helper yourself from the installed package directory or checkout:
 
 ```bash
-version=$(node -p "require('./node_modules/transcribe-cpp/package.json').version")
-# Use an existing matching checkout instead if this directory already exists.
-git clone --branch "v$version" --depth 1 https://github.com/handy-computer/transcribe.cpp "../transcribe.cpp-$version"
+npm run termux:setup
+# Optional: use local sources instead of downloading the matching release tag.
+npm run termux:setup -- --source /path/to/matching/transcribe.cpp --jobs 2
 ```
 
-Stop Pi processes using these libraries before rebuilding. CMake caches the source path, so a different checkout location needs a fresh build directory. For a native upgrade, also remove the old install to avoid mixing GGML libraries. The following removes **only generated artifacts in this Pi Voice checkout**; save a copy first if you need to restore the old native installation:
+The helper reads the installed binding version, checks existing cached libraries, and reuses a working cache without requiring build tools. Otherwise it builds in an isolated temporary directory, checks source/header compatibility, runs the native smoke check, and atomically publishes the complete installation. Failed builds do not replace an existing installation. Library paths are versioned, so a new binding version cannot silently reuse an old ABI. No environment export is needed; unset any old `TRANSCRIBE_LIBRARY` override and restart Pi to use managed discovery.
+
+To force rebuilding the **same** version (for example, when testing modified C++ sources), stop Pi, locate its cache directory with the following command, and move that directory aside before setup. A working cache otherwise wins even over `--source`:
 
 ```bash
-rm -rf -- .termux/build .termux/native
-npm run termux:setup -- --source "../transcribe.cpp-$version"
-export TRANSCRIBE_LIBRARY="$PWD/.termux/native/lib/libtranscribe.so"
+node --input-type=module -e "import { nativeInstallation } from './src/termux-native-paths.mjs'; console.log(nativeInstallation().directory)"
 ```
 
-The helper checks the source/header version against the installed binding and runs a no-model native smoke check. If upstream changes its C API, CMake options, install layout, or binding loader, adapt the helper and tests; do not bypass ABI checks or pretend Android is Linux. Keep `libtranscribe.so` and its matching `libggml*.so` siblings together.
+The setup log path is printed at startup. Use `npm_config_foreground_scripts=true` when installing to see dependency build output live; otherwise npm may show it only on failure. Logs are retained next to versioned installations; temporary source/build files are removed. SIGINT/SIGTERM cancellation stops build process groups and cleans up the lock. A hard kill or device shutdown can leave an adjacent `.lock` directory; remove it manually only after verifying no setup process is still running.
+
+If upstream changes its C API, CMake options, install layout, or binding loader, adapt the helper and tests; do not bypass ABI checks or pretend Android is Linux. Keep `libtranscribe.so` and its matching `libggml*.so` siblings together.
 
 ## Validation checklist
 
@@ -121,12 +125,13 @@ npm test
 Rebuild as above if the native dependency changed or the library is missing. Then:
 
 ```bash
-export TRANSCRIBE_LIBRARY="$PWD/.termux/native/lib/libtranscribe.so"
-npm run termux:check
+npm run termux:setup -- --check  # Managed cache only, no network/build
+npm run termux:check            # Explicit override, if set, otherwise managed cache
 npm pack --dry-run --ignore-scripts
 ```
 
-- Confirm package contents include `docs/`, setup/check scripts, and the audio modules, but exclude `.termux/` and `node_modules/`.
+- Confirm package contents include `docs/`, setup/check scripts, the audio modules, and `src/termux-native-paths.mjs`, but exclude `.termux/` and `node_modules/`.
+- Test a packed npm install with lifecycle scripts enabled and without the repository lockfile, as well as a checkout install. Check that postinstall builds or reuses the cache, resolves Android-capable Koffi, skips other platforms, and fails clearly on build errors. Native loading should need no manual export.
 - Run the upstream test suite on a supported desktop platform too when shared audio/controller behavior changes. Termux tests do not prove desktop native capture works.
 - With explicit microphone/model approval, manually check device selection, startup cancellation, recording/stop, and real transcription. Model downloads and recording are not part of the automated sync procedure.
 - Report which checks actually ran. Unit tests and the no-model native check do **not** establish speech-recognition accuracy, performance, or successful inference with a real model.

@@ -6,6 +6,7 @@ import type {
 } from "transcribe-cpp";
 import { convertChineseOutput, isChineseLanguage } from "./chinese.js";
 import type { ChineseOutput } from "./settings.js";
+import { loadTranscribeCpp } from "./termux-native.js";
 
 export type TranscriptionOptions = {
   signal?: AbortSignal;
@@ -109,7 +110,7 @@ export class TranscribeCppBackend {
     if (this.disposed) throw new Error("Transcription backend has been disposed");
 
     if (!this.loading) {
-      this.loading = import("transcribe-cpp")
+      this.loading = loadTranscribeCpp()
         .then(({ TranscribeModel }) => TranscribeModel.load(this.modelPath))
         .then((model) => {
           if (this.disposed) {

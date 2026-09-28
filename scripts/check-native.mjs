@@ -3,10 +3,10 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { nativeInstallation } from "../src/termux-native-paths.mjs";
 
-if (process.platform !== "android") throw new Error("This smoke check is for the Termux native build.");
-process.env.TRANSCRIBE_LIBRARY ||= fileURLToPath(new URL("../.termux/native/lib/libtranscribe.so", import.meta.url));
+if (process.platform !== "android" || process.arch !== "arm64") throw new Error("This smoke check is for Termux Android arm64.");
+process.env.TRANSCRIBE_LIBRARY ||= nativeInstallation().library;
 const { getAvailableBackends, libraryPath, TranscribeModel, version } = await import("transcribe-cpp");
 const require = createRequire(import.meta.resolve("transcribe-cpp"));
 const koffi = require("koffi");
