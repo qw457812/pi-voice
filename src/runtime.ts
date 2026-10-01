@@ -5,6 +5,7 @@ import type {
 } from "@earendil-works/pi-coding-agent";
 import { getKeybindings } from "@earendil-works/pi-tui";
 import { existsSync } from "node:fs";
+import { logStep, watchEventLoop } from "./log.js";
 import { DictationController } from "./dictation-controller.js";
 import { VoiceKeys } from "./keybindings.js";
 import type { TranscribeSettings } from "./settings.js";
@@ -15,6 +16,8 @@ import type { RecordingMeter } from "./visualizer.js";
 type ActiveRecording = {
   dictation: DictationController;
   meter: RecordingMeter;
+  /** Ends the event-loop watch held for the whole recording. */
+  unwatch: () => void;
 };
 
 const COMPLETION_WIDGET_MS = 5_000;
@@ -256,6 +259,7 @@ export function createPiVoiceRuntime(
     if (!active) return;
     recording = undefined;
     active.meter.stop();
+    active.unwatch();
     await active.dictation.dispose();
     if (dictation === active.dictation) dictation = undefined;
     clearCancelListener();
@@ -297,6 +301,7 @@ export function createPiVoiceRuntime(
         ctx.ui.notify(`No speech detected in ${result.speechSeconds.toFixed(1)}s of audio`, "warning");
       }
     } finally {
+      active.unwatch();
       await active.dictation.dispose();
       if (dictation === active.dictation) dictation = undefined;
       clearCancelListener();
@@ -309,6 +314,7 @@ export function createPiVoiceRuntime(
     ctx: ExtensionContext,
     configured: TranscribeSettings,
   ): Promise<void> {
+    logStep("loading audio module");
     const { createMicrophoneCapture, testMicrophonePermission } = await loadAudio();
     if (process.platform === "darwin") {
       const micStatus = await testMicrophonePermission();
@@ -352,8 +358,9 @@ export function createPiVoiceRuntime(
         discard: `${cancelKeys} to discard`,
       });
       meter.setModelState(controller.modelState);
-      recording = { dictation: controller, meter };
+      recording = { dictation: controller, meter, unwatch: watchEventLoop() };
     } catch (error) {
+      recording?.unwatch();
       recording = undefined;
       meter.stop();
       clearCancelListener();
@@ -381,6 +388,7 @@ export function createPiVoiceRuntime(
     // Static text on the shared widget slot: an animated spinner repaints every
     // frame, and the meter replaces plain lines without a component swap.
     const { clearTranscribeWidget, showTranscribeStatus } = await loadVisualizer();
+    logStep("loading settings");
     await loadSettingsOnce();
     if (settings && existsSync(settings.model.path)) {
       const cancelKeys = new VoiceKeys(getKeybindings()).keyText("voice.dictation.cancel");
@@ -480,6 +488,7 @@ export function createPiVoiceRuntime(
     cancelCompletionWidgetTimer();
     const disposal = dictation?.dispose();
     recording?.meter.stop();
+    recording?.unwatch();
     clearCancelListener();
     await Promise.all([
       disposal,
