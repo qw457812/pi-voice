@@ -2,8 +2,7 @@ import { execFile, spawn, type ChildProcess } from "node:child_process";
 import { promisify } from "node:util";
 import { CAPTURE_SAMPLE_RATE } from "./audio-constants.js";
 import { Deferred } from "./deferred.js";
-import type { DictationCapture } from "./dictation-controller.js";
-import { convertFrames } from "./pcm.js";
+import type { Capture, CapturedAudio, CaptureSinks } from "./dictation-controller.js";
 import { parsePulseMicrophones, selectPulseMicrophone, SETUP_HELP } from "./pulse-sources.js";
 import type { MicrophoneSetting } from "./settings.js";
 
@@ -47,7 +46,7 @@ type CaptureRun = {
   ready: Deferred;
   closed: Deferred;
   abort: AbortController;
-  frames: Int16Array[];
+  frames: Float32Array[];
   pending: Buffer;
   stderr: string;
   stopping: boolean;
@@ -55,13 +54,14 @@ type CaptureRun = {
   error?: Error;
   startTimer?: ReturnType<typeof setTimeout>;
   stopTimer?: ReturnType<typeof setTimeout>;
-  stopResult?: Promise<{ pcm: Float32Array }>;
+  stopResult?: Promise<CapturedAudio>;
 };
 
 /** Termux's parec client supplies resampled PCM without a Node native addon. */
-export class PulseAudioCapture implements DictationCapture {
+export class PulseAudioCapture implements Capture {
   private run: CaptureRun | undefined;
-  onFrame?: (frame: Int16Array) => void;
+  onAudio?: (chunk: Float32Array) => void;
+  onFailure?: (error: Error) => void;
 
   constructor(private readonly microphone: MicrophoneSetting) {}
 
@@ -99,6 +99,9 @@ export class PulseAudioCapture implements DictationCapture {
         if (!run.ready.settled) {
           run.ready.reject(run.error ?? new Error("Recording stopped before any audio arrived"));
         }
+        if (run.error) {
+          try { this.onFailure?.(run.error); } catch { /* UI must not prevent cleanup. */ }
+        }
         run.closed.resolve();
       });
       run.startTimer = setTimeout(() => {
@@ -120,7 +123,7 @@ export class PulseAudioCapture implements DictationCapture {
     }
   }
 
-  stop(): Promise<{ pcm: Float32Array }> {
+  stop(): Promise<CapturedAudio> {
     const run = this.run;
     if (!run) return Promise.reject(new Error("Microphone capture is not active"));
     if (run.stopResult) return run.stopResult;
@@ -128,9 +131,14 @@ export class PulseAudioCapture implements DictationCapture {
     run.abort.abort(); // Also cancels an in-flight pactl query during startup.
     this.terminate(run);
     run.stopResult = run.closed.promise.then(() => {
-      if (run.error) throw run.error;
-      if (run.frames.length === 0) throw new Error("No audio samples were captured");
-      return { pcm: convertFrames(run.frames) };
+      if (run.frames.length === 0) throw run.error ?? new Error("No audio samples were captured");
+      const pcm = new Float32Array(run.frames.reduce((length, frame) => length + frame.length, 0));
+      let offset = 0;
+      for (const frame of run.frames) {
+        pcm.set(frame, offset);
+        offset += frame.length;
+      }
+      return { pcm, ...(run.error ? { interruption: run.error } : {}) };
     }).finally(() => {
       if (this.run === run) this.run = undefined;
     });
@@ -154,11 +162,25 @@ export class PulseAudioCapture implements DictationCapture {
     run.pending = Buffer.from(bytes.subarray(completeBytes));
     if (completeBytes === 0) return;
     // Pipe reads need not align with samples, and each frame must own its data.
-    const frame = new Int16Array(completeBytes / Int16Array.BYTES_PER_ELEMENT);
-    for (let index = 0; index < frame.length; index++) frame[index] = bytes.readInt16LE(index * 2);
+    const frame = new Float32Array(completeBytes / Int16Array.BYTES_PER_ELEMENT);
+    for (let index = 0; index < frame.length; index++) frame[index] = bytes.readInt16LE(index * 2) / 32768;
     run.frames.push(frame);
     clearTimeout(run.startTimer);
     run.ready.resolve();
-    try { this.onFrame?.(frame); } catch { /* Presentation must not break audio capture. */ }
+    try { this.onAudio?.(frame); } catch { /* Presentation must not break audio capture. */ }
+  }
+}
+
+/** OpenCapture owns cleanup when startup fails, before the controller owns it. */
+export async function openPulseMicrophone(microphone: MicrophoneSetting, sinks: CaptureSinks): Promise<Capture> {
+  const capture = new PulseAudioCapture(microphone);
+  capture.onAudio = sinks.onAudio;
+  capture.onFailure = sinks.onFailure;
+  try {
+    await capture.start();
+    return capture;
+  } catch (error) {
+    await capture.stop().catch(() => undefined);
+    throw error;
   }
 }

@@ -4,7 +4,7 @@ import { chmod, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test, type TestContext } from "node:test";
-import { getPulseMicrophones, PulseAudioCapture } from "../src/pulse-audio.js";
+import { getPulseMicrophones, openPulseMicrophone, PulseAudioCapture } from "../src/pulse-audio.js";
 import type { MicrophoneSetting } from "../src/settings.js";
 
 const defaultMicrophone: MicrophoneSetting = { type: "system-default" };
@@ -103,14 +103,14 @@ test("PulseAudio rejects non-array JSON source lists", unixOnly, async (t) => {
 test("PCM pipe fragments, final samples, resampling options and stop are handled", unixOnly, async (t) => {
   const { capture, calls } = await fixture(t, { defaultSource: monitor.name });
   const received: number[] = [];
-  capture.onFrame = (frame) => { received.push(...frame); };
+  capture.onAudio = (frame) => { received.push(...frame); };
   await capture.start();
   await waitFor(() => received.length === samples.length);
   const stopping = capture.stop();
   assert.equal(capture.stop(), stopping);
   const { pcm } = await stopping;
-  assert.deepEqual(received, [...samples, 1234]);
-  assert.deepEqual([...pcm], received.map((sample) => sample / 32768));
+  assert.deepEqual(received, [...samples, 1234].map((sample) => sample / 32768));
+  assert.deepEqual([...pcm], received);
   assert.deepEqual(JSON.parse(await readFile(calls, "utf8")), [
     `--device=${input.name}`, "--raw", "--format=s16le", "--rate=16000", "--channels=1", "--latency-msec=32",
   ]);
@@ -189,26 +189,32 @@ test("cancellation also works while waiting for the first PCM sample", unixOnly,
   await starting;
 });
 
-test("late capture failures and incomplete samples are not submitted as successful audio", unixOnly, async (t) => {
+test("incomplete samples retain captured audio with an interruption", unixOnly, async (t) => {
   const { capture } = await fixture(t, { mode: "odd" });
   let count = 0;
-  capture.onFrame = (frame) => { count += frame.length; };
+  capture.onAudio = (frame) => { count += frame.length; };
   await capture.start();
   await waitFor(() => count === samples.length);
-  await assert.rejects(capture.stop(), /incomplete Int16/);
+  const result = await capture.stop();
+  assert.match(result.interruption!.message, /incomplete Int16/);
+  assert.equal(result.pcm.length, samples.length);
 });
 
 test("an unexpected recorder exit is reported even after startup succeeded", unixOnly, async (t) => {
   const { capture } = await fixture(t, { mode: "exit" });
+  const failures: Error[] = [];
+  capture.onFailure = (error) => failures.push(error);
   await capture.start();
-  await new Promise((resolve) => setTimeout(resolve, 100));
-  await assert.rejects(capture.stop(), /ended unexpectedly/);
+  await waitFor(() => failures.length > 0);
+  const result = await capture.stop();
+  assert.match(result.interruption!.message, /ended unexpectedly/);
+  assert.deepEqual(failures, [result.interruption]);
 });
 
 test("unresponsive recorders are killed rather than hanging shutdown", unixOnly, async (t) => {
   const { capture } = await fixture(t, { mode: "ignore-stop" });
   await capture.start();
-  await assert.rejects(capture.stop(), /terminated it forcibly/);
+  assert.match((await capture.stop()).interruption!.message, /terminated it forcibly/);
 });
 
 test("missing PCM times out without claiming to be listening", unixOnly, async (t) => {
@@ -219,7 +225,29 @@ test("missing PCM times out without claiming to be listening", unixOnly, async (
 
 test("Android audio factory does not import the unsupported native recorder", {
   skip: process.platform !== "android",
-}, async () => {
-  const { createMicrophoneCapture } = await import("../src/audio.js");
-  assert.ok(createMicrophoneCapture(defaultMicrophone) instanceof PulseAudioCapture);
+}, async (t) => {
+  await fixture(t);
+  const { microphonePermission, getAvailableMicrophones, openMicrophone } = await import("../src/audio.js");
+  assert.equal(microphonePermission(), "unknown");
+  const devices = await getAvailableMicrophones();
+  assert.deepEqual(devices.map(({ name, occurrence, isMonitor }) => ({ name, occurrence, isMonitor })), [
+    { name: input.name, occurrence: 0, isMonitor: false },
+  ]);
+  const audio: number[] = [];
+  const capture = await openMicrophone({ type: "device", name: devices[0]!.name, occurrence: 0 }, {
+    onAudio: (chunk) => audio.push(...chunk),
+    onFailure: (error) => assert.fail(error.message),
+  });
+  t.after(() => capture.stop().catch(() => undefined));
+  await waitFor(() => audio.length === samples.length);
+  const { pcm } = await capture.stop();
+  assert.deepEqual([...pcm], [...samples, 1234].map((sample) => sample / 32768));
+});
+
+test("OpenCapture cleans up failed startup and allows another opening", unixOnly, async (t) => {
+  const { directory } = await fixture(t, { mode: "error" });
+  const sinks = { onAudio() {}, onFailure() {} };
+  await assert.rejects(openPulseMicrophone(defaultMicrophone, sinks), /Access denied/);
+  await rm(join(directory, "parec"));
+  await assert.rejects(openPulseMicrophone(defaultMicrophone, sinks), /Could not run parec/);
 });
