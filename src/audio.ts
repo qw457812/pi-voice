@@ -1,5 +1,4 @@
 import type { InputDevice, Permission, Recording } from "@handy-computer/recorder";
-import { createRequire } from "node:module";
 import { CAPTURE_SAMPLE_RATE } from "./audio-constants.js";
 import type { Capture, CaptureSinks } from "./dictation-controller.js";
 import { logLevel, writeLog } from "./log.js";
@@ -8,23 +7,19 @@ import { MicrophoneUnavailableError } from "./microphone-error.js";
 import { getPulseMicrophones, openPulseMicrophone } from "./pulse-audio.js";
 
 export type { InputDevice, Permission };
-export { CAPTURE_SAMPLE_RATE } from "./audio-constants.js";
 export { MicrophoneUnavailableError } from "./microphone-error.js";
 
-let desktop: typeof import("@handy-computer/recorder") | undefined;
-function desktopRecorder(): typeof import("@handy-computer/recorder") {
-  if (desktop) return desktop;
-  // Android cannot load handy's native addon. Only desktop operations load it.
-  const recorder = createRequire(import.meta.url)("@handy-computer/recorder") as typeof import("@handy-computer/recorder");
-  const level = logLevel();
-  if (level) {
-    recorder.setLogHandler(
-      (record) => writeLog(record.level === "trace" ? "debug" : record.level, "recorder", record.message, record.timeMs),
-      { level: level === "debug" ? "debug" : "info" },
-    );
-  }
-  desktop = recorder;
-  return recorder;
+// Android cannot load handy's native addon. audio.ts itself is loaded on demand.
+const desktop = process.platform === "android" ? undefined : await import("@handy-computer/recorder");
+
+// The recorder's own log into Pi Voice's, stamped with when each line was
+// written: lines from a blocked event loop arrive late but sort correctly.
+const level = logLevel();
+if (desktop && level) {
+  desktop.setLogHandler(
+    (record) => writeLog(record.level === "trace" ? "debug" : record.level, "recorder", record.message, record.timeMs),
+    { level: level === "debug" ? "debug" : "info" },
+  );
 }
 
 /** 32 ms chunks: a power of two, so the meter's FFT uses every sample. */
@@ -38,12 +33,12 @@ export async function getAvailableMicrophones(): Promise<InputDevice[]> {
       isDefault: false, idIsStable: true, isMonitor: false,
     }));
   }
-  return (await desktopRecorder().listInputDevices()).filter((device) => !device.isMonitor);
+  return (await desktop!.listInputDevices()).filter((device) => !device.isMonitor);
 }
 
 /** A synchronous read that never prompts. */
 export function microphonePermission(): Permission {
-  return process.platform === "android" ? "unknown" : desktopRecorder().permissionStatus();
+  return process.platform === "android" ? "unknown" : desktop!.permissionStatus();
 }
 
 export function findMicrophone(
@@ -68,7 +63,7 @@ function interruption(recording: Recording): Error | undefined {
 /** Opens the microphone and starts recording 16 kHz mono into `sinks`. */
 export async function openMicrophone(microphone: MicrophoneSetting, sinks: CaptureSinks): Promise<Capture> {
   if (process.platform === "android") return openPulseMicrophone(microphone, sinks);
-  const { listInputDevices, Recorder } = desktopRecorder();
+  const { listInputDevices, Recorder } = desktop!;
   let device: InputDevice | undefined;
   if (microphone.type === "device") {
     device = findMicrophone(await listInputDevices(), microphone);

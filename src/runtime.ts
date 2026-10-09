@@ -357,9 +357,8 @@ export function createPiVoiceRuntime(
       // Paint startup feedback before the synchronous device lookup.
       await new Promise<void>((resolve) => setImmediate(resolve));
       if (shuttingDown) return;
-      const starting = controller.start(configured);
       listenForKeys(ctx);
-      await starting;
+      await controller.start(configured);
       if (controller.state.phase !== "listening") {
         await reportDictationError(ctx, controller);
         return;

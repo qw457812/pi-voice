@@ -72,7 +72,7 @@ pi -e .
 
 `--source` is optional and must match the installed binding version. An already working cache is reused even when `--source` is supplied. Stop Pi and move the cached installation aside if you need to force a rebuild of the same version; see the [maintenance guide](maintaining-termux.md#rebuilding-after-a-native-dependency-change).
 
-`TRANSCRIBE_LIBRARY` remains an advanced override and takes precedence over automatic discovery. Existing `.termux/native/lib` builds can still be used this way. The install/build helper always builds/checks the managed cache without changing an explicit override; unset the override and restart Pi to switch back to managed loading. Keep `libtranscribe.so` and its sibling `libggml*.so` libraries together.
+`TRANSCRIBE_LIBRARY` remains an advanced override and takes precedence over automatic discovery. The install/build helper always builds/checks the managed cache without changing an explicit override; unset the override and restart Pi to switch back to managed loading. Keep `libtranscribe.so` and its sibling `libggml*.so` libraries together.
 
 The native smoke check covers library loading, ABI layouts, CPU discovery, asynchronous FFI, callbacks, and model-load error handling. It does **not** verify real model inference or performance.
 
