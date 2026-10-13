@@ -1,6 +1,6 @@
 import { execFile, spawn, type ChildProcess } from "node:child_process";
 import { promisify } from "node:util";
-import { CAPTURE_SAMPLE_RATE } from "./audio-constants.js";
+import { CAPTURE_CHUNK_SAMPLES, CAPTURE_SAMPLE_RATE } from "./audio-constants.js";
 import { Deferred } from "./deferred.js";
 import type { Capture, CapturedAudio, CaptureSinks } from "./dictation-controller.js";
 import { parsePulseMicrophones, selectPulseMicrophone, SETUP_HELP } from "./pulse-sources.js";
@@ -174,11 +174,40 @@ export class PulseAudioCapture implements Capture {
 /** OpenCapture owns cleanup when startup fails, before the controller owns it. */
 export async function openPulseMicrophone(microphone: MicrophoneSetting, sinks: CaptureSinks): Promise<Capture> {
   const capture = new PulseAudioCapture(microphone);
-  capture.onAudio = sinks.onAudio;
+  // Pipe reads have arbitrary sizes; Silero requires one 512-sample frame.
+  let frame = new Float32Array(CAPTURE_CHUNK_SAMPLES);
+  let filled = 0;
+  capture.onAudio = (samples) => {
+    let offset = 0;
+    while (offset < samples.length) {
+      const count = Math.min(frame.length - filled, samples.length - offset);
+      frame.set(samples.subarray(offset, offset + count), filled);
+      filled += count;
+      offset += count;
+      if (filled === frame.length) {
+        const complete = frame;
+        frame = new Float32Array(CAPTURE_CHUNK_SAMPLES);
+        filled = 0;
+        try { sinks.onAudio(complete); } catch { /* Presentation must not break audio capture. */ }
+      }
+    }
+  };
   capture.onFailure = sinks.onFailure;
   try {
     await capture.start();
-    return capture;
+    let stopping: Promise<CapturedAudio> | undefined;
+    return {
+      stop() {
+        return (stopping ??= capture.stop().then((result) => {
+          if (filled > 0) {
+            const tail = frame.slice(0, filled);
+            filled = 0;
+            try { sinks.onAudio(tail); } catch { /* Presentation must not break audio capture. */ }
+          }
+          return result;
+        }));
+      },
+    };
   } catch (error) {
     await capture.stop().catch(() => undefined);
     throw error;

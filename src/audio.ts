@@ -1,5 +1,5 @@
 import type { InputDevice, Permission, Recording } from "@handy-computer/recorder";
-import { CAPTURE_SAMPLE_RATE } from "./audio-constants.js";
+import { CAPTURE_CHUNK_SAMPLES, CAPTURE_SAMPLE_RATE } from "./audio-constants.js";
 import type { Capture, CaptureSinks } from "./dictation-controller.js";
 import { logLevel, writeLog } from "./log.js";
 import type { MicrophoneSetting } from "./settings.js";
@@ -21,9 +21,6 @@ if (desktop && level) {
     { level: level === "debug" ? "debug" : "info" },
   );
 }
-
-/** 32 ms chunks: a power of two, so the meter's FFT uses every sample. */
-const FRAMES_PER_CHUNK = 512;
 
 /** Input devices to offer, without PulseAudio monitors of outputs. */
 export async function getAvailableMicrophones(): Promise<InputDevice[]> {
@@ -74,7 +71,7 @@ export async function openMicrophone(microphone: MicrophoneSetting, sinks: Captu
     device: device?.id,
     sampleRate: CAPTURE_SAMPLE_RATE,
     channels: "mono",
-    framesPerChunk: FRAMES_PER_CHUNK,
+    framesPerChunk: CAPTURE_CHUNK_SAMPLES,
     onChunk: ({ samples }) => sinks.onAudio(samples),
     onFailure: (error) => sinks.onFailure(error),
   });

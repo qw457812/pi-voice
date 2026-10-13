@@ -14,6 +14,7 @@ import { VoiceKeys } from "./keybindings.js";
 import type { TranscribeSettings } from "./settings.js";
 import { displayShortcut } from "./shortcut-core.js";
 import { TranscriptionService } from "./transcription-service.js";
+import { VoiceActivityDetection } from "./vad.js";
 import type { RecordingMeter } from "./visualizer.js";
 
 type ActiveRecording = {
@@ -66,6 +67,7 @@ export function createPiVoiceRuntime(
   let audioModulePromise: Promise<typeof import("./audio.js")> | undefined;
   let visualizerModulePromise: Promise<typeof import("./visualizer.js")> | undefined;
   const transcriptionService = new TranscriptionService();
+  const voiceActivity = new VoiceActivityDetection();
 
   function loadAudio(): Promise<typeof import("./audio.js")> {
     return (audioModulePromise ??= import("./audio.js"));
@@ -145,6 +147,7 @@ export function createPiVoiceRuntime(
       chineseOutput: previous.chineseOutput,
       currentModelId: previous.model.id,
       microphone: previous.microphone,
+      voiceActivityDetection: previous.voiceActivityDetection,
       postActivation: "advance",
     });
     if (configured) rememberSettings(configured);
@@ -348,6 +351,7 @@ export function createPiVoiceRuntime(
       openCapture: openMicrophone,
       onAudio: (chunk) => meter.push(chunk),
       onChange: updateMeter,
+      createSpeechFilter: (settings, onSpeech) => voiceActivity.createFilter(settings, onSpeech),
     });
     function updateMeter(): void {
       meter.update({ modelState: controller.modelState, microphoneStopped: controller.interruption !== undefined });
@@ -507,6 +511,8 @@ export function createPiVoiceRuntime(
       operation?.catch(() => undefined),
       transcriptionService.shutdown().catch(() => undefined),
     ]);
+    // After the dictation, so no recording still holds a VAD session.
+    await voiceActivity.dispose().catch(() => undefined);
     recording = undefined;
     dictation = undefined;
     if (visualizerModulePromise) {

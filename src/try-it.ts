@@ -18,6 +18,7 @@ import type { TranscribeSettings } from "./settings.js";
 import { displayShortcut } from "./shortcut-core.js";
 import { TranscriptionService } from "./transcription-service.js";
 import { TranscriptPreview } from "./transcript-preview.js";
+import { VoiceActivityDetection } from "./vad.js";
 import { editorBorder, onboardingHeader, PANEL_PADDING, panelBorder, paneRowBudget } from "./ui-components.js";
 import {
   formatTranscriptionSummary,
@@ -28,7 +29,7 @@ import {
 
 type UiTheme = ExtensionContext["ui"]["theme"];
 
-type TryItPaneOptions = Pick<DictationControllerOptions, "openCapture" | "now"> & {
+type TryItPaneOptions = Pick<DictationControllerOptions, "openCapture" | "now" | "createSpeechFilter"> & {
   /** Shown only before the first recording attempt when macOS has not asked yet. */
   showMacPermissionNote?: boolean;
 };
@@ -83,6 +84,7 @@ export class TryItPane implements Component {
     this.dictation = new DictationController(service, {
       openCapture: options.openCapture,
       now: options.now,
+      createSpeechFilter: options.createSpeechFilter,
       onChange: () => this.refresh(),
       onAudio: (chunk) => {
         this.analyzer.push(chunk);
@@ -303,16 +305,19 @@ export class TryItPane implements Component {
 
 export async function tryVoice(ctx: ExtensionContext, settings: TranscribeSettings): Promise<TryItResult | undefined> {
   const service = new TranscriptionService();
+  const voiceActivity = new VoiceActivityDetection();
   let pane: TryItPane | undefined;
   try {
     return await ctx.ui.custom<TryItResult>((tui, theme, keybindings, done) =>
       (pane = new TryItPane(tui, theme, keybindings, settings, service, done, {
         openCapture: openMicrophone,
+        createSpeechFilter: (configured, onSpeech) => voiceActivity.createFilter(configured, onSpeech),
         showMacPermissionNote: process.platform === "darwin" && microphonePermission() === "not-determined",
       })),
     );
   } finally {
     await pane?.dispose();
     await service.shutdown();
+    await voiceActivity.dispose();
   }
 }

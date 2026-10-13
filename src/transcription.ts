@@ -104,7 +104,7 @@ const TRANSCRIBE_LEVELS: Record<number, LogLevel> = { 1: "debug", 2: "warn", 3: 
 const TRANSCRIBE_CONTINUATION = 5;
 let lastTranscribeLevel: LogLevel = "debug";
 
-function routeTranscribeLog(setLogHandler: typeof import("transcribe-cpp").setLogHandler): void {
+export function routeTranscribeLog(setLogHandler: typeof import("transcribe-cpp").setLogHandler): void {
   setLogHandler((level, message) => {
     if (level !== TRANSCRIBE_CONTINUATION) lastTranscribeLevel = TRANSCRIBE_LEVELS[level] ?? "debug";
     writeLog(lastTranscribeLevel, "transcribe", message);

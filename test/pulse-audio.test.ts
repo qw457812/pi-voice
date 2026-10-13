@@ -14,6 +14,7 @@ const samples = [-32768, -1000, 0, 1000, 32767];
 const unixOnly = { skip: process.platform === "win32" };
 
 type FixtureOptions = {
+  samples?: number[];
   sources?: unknown;
   defaultSource?: string;
   queryError?: boolean;
@@ -226,7 +227,8 @@ test("missing PCM times out without claiming to be listening", unixOnly, async (
 test("Android audio factory does not import the unsupported native recorder", {
   skip: process.platform !== "android",
 }, async (t) => {
-  await fixture(t);
+  const inputSamples = Array.from({ length: 1025 }, (_, index) => index - 512);
+  await fixture(t, { samples: inputSamples });
   const { microphonePermission, getAvailableMicrophones, openMicrophone } = await import("../src/audio.js");
   assert.equal(microphonePermission(), "unknown");
   const devices = await getAvailableMicrophones();
@@ -239,9 +241,30 @@ test("Android audio factory does not import the unsupported native recorder", {
     onFailure: (error) => assert.fail(error.message),
   });
   t.after(() => capture.stop().catch(() => undefined));
-  await waitFor(() => audio.length === samples.length);
+  await waitFor(() => audio.length === 1024);
   const { pcm } = await capture.stop();
-  assert.deepEqual([...pcm], [...samples, 1234].map((sample) => sample / 32768));
+  assert.deepEqual([...pcm], [...inputSamples, 1234].map((sample) => sample / 32768));
+  assert.deepEqual(audio, [...pcm]);
+});
+
+test("PulseAudio factory emits fixed VAD frames and flushes the final partial frame", unixOnly, async (t) => {
+  const inputSamples = Array.from({ length: 1025 }, (_, index) => index - 512);
+  await fixture(t, { samples: inputSamples });
+  const frames: Float32Array[] = [];
+  const capture = await openPulseMicrophone(defaultMicrophone, {
+    onAudio: (frame) => frames.push(frame),
+    onFailure: (error) => assert.fail(error.message),
+  });
+  t.after(() => capture.stop().catch(() => undefined));
+  await waitFor(() => frames.length === 2);
+  assert.deepEqual(frames.map((frame) => frame.length), [512, 512]);
+  const stopping = capture.stop();
+  assert.equal(capture.stop(), stopping);
+  const { pcm } = await stopping;
+  assert.deepEqual(frames.map((frame) => frame.length), [512, 512, 2]);
+  const expected = [...inputSamples, 1234].map((sample) => sample / 32768);
+  assert.deepEqual(frames.flatMap((frame) => [...frame]), expected);
+  assert.deepEqual([...pcm], expected);
 });
 
 test("OpenCapture cleans up failed startup and allows another opening", unixOnly, async (t) => {

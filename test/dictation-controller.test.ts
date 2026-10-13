@@ -333,3 +333,80 @@ test("a model that can't be reserved after the microphone opened releases the mi
   assert.equal(mic.captures[0]!.stops, 1);
   await controller.dispose();
 });
+
+/** Keeps chunks whose samples are loud, as a stand-in for Silero plus the gate. */
+class FakeSpeechFilter {
+  readonly kept: Float32Array[] = [];
+  discarded = false;
+  constructor(private readonly onSpeech: (chunk: Float32Array) => void) {}
+  push(chunk: Float32Array): void {
+    if (chunk[0]! < 0.5) return;
+    this.kept.push(chunk);
+    this.onSpeech(chunk);
+  }
+  async finish(): Promise<Float32Array> {
+    const out = new Float32Array(this.kept.reduce((sum, chunk) => sum + chunk.length, 0));
+    let offset = 0;
+    for (const chunk of this.kept) { out.set(chunk, offset); offset += chunk.length; }
+    return out;
+  }
+  discard(): void { this.discarded = true; }
+}
+
+function vadHarness() {
+  const service = fakeDictationService();
+  const mic = new FakeMicrophone();
+  const filters: FakeSpeechFilter[] = [];
+  const controller = new DictationController(service, {
+    openCapture: mic.open,
+    now: () => 0,
+    createSpeechFilter: (_settings, onSpeech) => {
+      const filter = new FakeSpeechFilter(onSpeech);
+      filters.push(filter);
+      return filter;
+    },
+  });
+  return { controller, service, captures: mic.captures, filters };
+}
+
+test("with VAD, the stream and the submission get only the speech it keeps", async () => {
+  const h = vadHarness();
+  await h.controller.start(settings);
+  const capture = h.captures[0]!;
+  const reservation = h.service.reservations[0]!;
+  capture.feed(new Float32Array(8000));
+  capture.feed(new Float32Array(8000).fill(0.9));
+  capture.feed(new Float32Array(512));
+  assert.deepEqual(reservation.chunks.map((chunk) => chunk.length), [8000]);
+  const submission = h.controller.stop();
+  await nextTurn();
+  assert.equal(reservation.pcm?.length, 8000);
+  assert.ok(reservation.pcm?.every((sample) => sample === Math.fround(0.9)));
+  reservation.result.resolve("hello");
+  // speechSeconds stays the recording's length, as the UI reports it.
+  assert.deepEqual(await submission, { text: "hello", speechSeconds: 1, transcribeSeconds: 0 });
+  await h.controller.dispose();
+});
+
+test("with VAD, a take without speech finishes empty and never transcribes", async () => {
+  const h = vadHarness();
+  await h.controller.start(settings);
+  h.captures[0]!.feed(new Float32Array(16000));
+  const result = await h.controller.stop();
+  assert.deepEqual(result, { text: "", speechSeconds: 1, transcribeSeconds: 0 });
+  const reservation = h.service.reservations[0]!;
+  assert.equal(reservation.submissions, 0);
+  assert.equal(reservation.cancelled, 1);
+  assert.equal(h.controller.state.phase, "result");
+  await h.controller.dispose();
+});
+
+test("cancelling a take discards its VAD", async () => {
+  const h = vadHarness();
+  await h.controller.start(settings);
+  h.captures[0]!.feed(new Float32Array(512).fill(0.9));
+  await h.controller.cancel();
+  assert.equal(h.filters[0]!.discarded, true);
+  assert.equal(h.service.reservations[0]!.submissions, 0);
+  await h.controller.dispose();
+});

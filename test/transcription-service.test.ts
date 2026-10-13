@@ -17,6 +17,7 @@ function settings(modelPath: string): TranscribeSettings {
     transcriptionLanguage: "auto",
     chineseOutput: "simplified",
     microphone: { type: "system-default" },
+    voiceActivityDetection: true,
     model: { source: "catalog", id: modelPath, path: modelPath },
   };
 }

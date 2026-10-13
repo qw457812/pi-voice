@@ -20,6 +20,8 @@
     "docs",
     "scripts/setup-termux.mjs",
     "scripts/check-native.mjs",
+    "models/silero-vad-v6.2-F32.gguf",
+    "models/README.md",
     "README.md",
     "LICENSE"
   ],
