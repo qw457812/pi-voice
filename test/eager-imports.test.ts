@@ -11,7 +11,15 @@ const NATIVE_OR_TUI = ["audio", "transcription", "visualizer", "file-audio"];
 const BOUNDARIES: Record<string, string[]> = {
   index: ["runtime", ...NATIVE_OR_TUI],
   runtime: NATIVE_OR_TUI,
+  vad: ["transcription"],
 };
+
+test("VAD shares the native loader without dynamically importing the transcription backend", () => {
+  const source = readFileSync(new URL("../src/vad.js", import.meta.url), "utf8");
+  assert.doesNotMatch(source, /import\(["']\.\/transcription\.js["']\)/);
+  assert.doesNotMatch(source, /import\(["']transcribe-cpp["']\)/);
+  assert.match(source, /loadTranscribeCpp\(\)/);
+});
 
 function staticImports(module: string): string[] {
   const source = readFileSync(new URL(`../src/${module}.js`, import.meta.url), "utf8");

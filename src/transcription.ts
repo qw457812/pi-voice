@@ -5,7 +5,7 @@ import type {
   TranscribeModel,
 } from "transcribe-cpp";
 import { convertChineseOutput, isChineseLanguage } from "./chinese.js";
-import { writeLog, type LogLevel } from "./log.js";
+import { routeTranscribeLog } from "./transcribe-log.js";
 import type { ChineseOutput } from "./settings.js";
 import { loadTranscribeCpp } from "./termux-native.js";
 
@@ -96,19 +96,6 @@ class TranscribeCppDictationStream implements DictationStream {
     this.stream.reset();
     this.session.dispose();
   }
-}
-
-// transcribe-cpp's levels (TRANSCRIBE_LOG_LEVEL_*). Its info is a screenful
-// of GPU setup on every model load, so it goes to debug.
-const TRANSCRIBE_LEVELS: Record<number, LogLevel> = { 1: "debug", 2: "warn", 3: "error", 4: "debug" };
-const TRANSCRIBE_CONTINUATION = 5;
-let lastTranscribeLevel: LogLevel = "debug";
-
-export function routeTranscribeLog(setLogHandler: typeof import("transcribe-cpp").setLogHandler): void {
-  setLogHandler((level, message) => {
-    if (level !== TRANSCRIBE_CONTINUATION) lastTranscribeLevel = TRANSCRIBE_LEVELS[level] ?? "debug";
-    writeLog(lastTranscribeLevel, "transcribe", message);
-  });
 }
 
 /** A reusable loaded transcribe.cpp model. Calls must be scheduled sequentially. */

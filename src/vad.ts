@@ -5,6 +5,8 @@ import { getCatalogModel } from "./catalog.js";
 import type { SpeechFilter } from "./dictation-controller.js";
 import { describeError, log } from "./log.js";
 import type { TranscribeSettings } from "./settings.js";
+import { loadTranscribeCpp } from "./termux-native.js";
+import { routeTranscribeLog } from "./transcribe-log.js";
 
 // Constants come from Handy (cjpais/handy, src-tauri/src/audio_toolkit/vad).
 // It's SmoothedVad idea to improve basic VAD performance
@@ -261,8 +263,7 @@ export class VoiceActivityDetection {
 
 async function loadModel(): Promise<TranscribeModel> {
   // Route native logs into Pi Voice's log before the first native call.
-  const { routeTranscribeLog } = await import("./transcription.js");
-  const { TranscribeModel, setLogHandler } = await import("transcribe-cpp");
+  const { TranscribeModel, setLogHandler } = await loadTranscribeCpp();
   routeTranscribeLog(setLogHandler);
   return TranscribeModel.load(MODEL_PATH);
 }

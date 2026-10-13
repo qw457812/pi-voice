@@ -13,7 +13,13 @@ export function configureTermuxNative(platform = process.platform): void {
   process.env.TRANSCRIBE_LIBRARY = library;
 }
 
+let binding: Promise<typeof import("transcribe-cpp")> | undefined;
+
 export async function loadTranscribeCpp(): Promise<typeof import("transcribe-cpp")> {
   configureTermuxNative();
-  return import("transcribe-cpp");
+  // VAD and transcription can start together; initialize the binding only once.
+  return (binding ??= import("transcribe-cpp").catch((error: unknown) => {
+    binding = undefined;
+    throw error;
+  }));
 }
