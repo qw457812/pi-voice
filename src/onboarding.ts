@@ -19,6 +19,7 @@ import { tryVoice } from "./try-it.js";
 import {
   DEFAULT_MICROPHONE,
   settingsForModel,
+  settingsWithPreferredLanguages,
   writeSettings,
   type ChineseOutput,
   type MicrophoneSetting,
@@ -39,10 +40,12 @@ type SettingsOptions = NonNullable<Parameters<typeof settingsForModel>[2]>;
 function createSettingsActivation(
   options: () => SettingsOptions,
   onCommitted: (settings: TranscribeSettings) => void,
+  ctx: ExtensionContext,
 ) {
   return createModelActivation({
     buildSettings: (model, path) => settingsForModel(model.id, path, options()),
     onCommitted,
+    onWarning: (message) => ctx.ui.notify(message, "warning"),
   });
 }
 
@@ -54,6 +57,7 @@ type ModelSelectionOptions = {
   currentModelId?: string;
   microphone?: MicrophoneSetting;
   voiceActivityDetection?: boolean;
+  longformChunking?: boolean;
   /** Persists language changes made before this flow activates a model. */
   onPreferredLanguagesChange?: (languages: string[]) => Promise<void>;
   postActivation?: CatalogModelPostActivation;
@@ -79,11 +83,13 @@ export async function runModelSelection(
       chineseOutput: configured?.chineseOutput ?? options.chineseOutput,
       microphone: configured?.microphone ?? options.microphone ?? DEFAULT_MICROPHONE,
       voiceActivityDetection: configured?.voiceActivityDetection ?? options.voiceActivityDetection,
+      longformChunking: configured?.longformChunking ?? options.longformChunking,
     }),
     (settings) => {
       configured = settings;
       currentModelId = settings.model.id;
     },
+    ctx,
   );
 
   // One pane switches between the models on disk and downloads new ones.
@@ -108,7 +114,7 @@ export async function runModelSelection(
     if (changed) {
       try {
         if (configured) {
-          const updated = { ...configured, preferredLanguages: changed.languages };
+          const updated = settingsWithPreferredLanguages(configured, changed.languages);
           await writeSettings(updated);
           configured = updated;
         } else {
@@ -207,10 +213,12 @@ export async function changeOnboardingModel(
       microphone: current.microphone,
       chineseOutput: current.chineseOutput,
       voiceActivityDetection: current.voiceActivityDetection,
+      longformChunking: current.longformChunking,
     }),
     (settings) => {
       chosen = settings;
     },
+    ctx,
   );
 
   while (true) {
@@ -278,6 +286,7 @@ export async function runOnboarding(
       (settings) => {
         configured = settings;
       },
+      ctx,
     );
 
     let changeLanguages = false;

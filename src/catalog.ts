@@ -25,6 +25,10 @@ export type CatalogModel = {
 
 export const CATALOG_MODELS: readonly CatalogModel[] = catalog.models;
 
+/** Language detection model for transcription models without native
+ * language detection. */
+export const LANGUAGE_DETECTION_MODEL: CatalogModel = catalog.languageDetector;
+
 const languageNames = new Intl.DisplayNames(["en"], { type: "language" });
 
 export function displayLanguage(language: string): string {

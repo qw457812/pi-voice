@@ -1,10 +1,11 @@
 import type {
   Capabilities,
+  LangIdResult,
   Session,
   Stream,
   TranscribeModel,
 } from "transcribe-cpp";
-import { convertChineseOutput, isChineseLanguage } from "./chinese.js";
+import { convertChineseOutput, shouldConvertChinese } from "./chinese.js";
 import { routeTranscribeLog } from "./transcribe-log.js";
 import type { ChineseOutput } from "./settings.js";
 import { loadTranscribeCpp } from "./termux-native.js";
@@ -13,11 +14,15 @@ export type TranscriptionOptions = {
   signal?: AbortSignal;
   language?: string;
   chineseOutput?: ChineseOutput;
+  /** Chinese is a preferred or chosen language: convert any Chinese text. */
+  chineseEnabled?: boolean;
 };
 
 export type DictationStream = {
-  feed(chunk: Float32Array): Promise<void>;
-  finalize(): Promise<string>;
+  /** `probs` are the chunk's Silero frame probabilities, when the take has them. */
+  feed(chunk: Float32Array, probs?: readonly number[]): Promise<void>;
+  /** `audio` is the whole take, for a stream that checks it saw all of it. */
+  finalize(audio?: Float32Array): Promise<string>;
   reset(): void;
 };
 
@@ -34,18 +39,18 @@ function validateLanguage(
 
 /**
  * Shared final step for batch and streaming output: trim, then apply the
- * Chinese script preference when the detected (or configured) language is
- * Chinese. Keeping this in one place keeps the two paths from drifting.
+ * Chinese script preference (see shouldConvertChinese). Keeping this in one
+ * place keeps the two paths from drifting.
  */
 async function finishTranscript(
   text: string,
   detectedLanguage: string,
-  configuredLanguage: string | undefined,
-  chineseOutput: ChineseOutput,
+  options: TranscriptionOptions,
 ): Promise<string> {
   const trimmed = text.trim();
-  return isChineseLanguage(detectedLanguage || configuredLanguage || "")
-    ? convertChineseOutput(trimmed, chineseOutput)
+  const language = detectedLanguage || options.language || "";
+  return shouldConvertChinese(trimmed, { chineseEnabled: options.chineseEnabled ?? false, language })
+    ? convertChineseOutput(trimmed, options.chineseOutput ?? "simplified")
     : trimmed;
 }
 
@@ -55,8 +60,7 @@ class TranscribeCppDictationStream implements DictationStream {
   constructor(
     private readonly session: Session,
     private readonly stream: Stream,
-    private readonly language: string | undefined,
-    private readonly chineseOutput: ChineseOutput,
+    private readonly options: TranscriptionOptions,
   ) {}
 
   async feed(chunk: Float32Array): Promise<void> {
@@ -81,7 +85,7 @@ class TranscribeCppDictationStream implements DictationStream {
       this.close();
     }
 
-    return finishTranscript(text, detectedLanguage, this.language, this.chineseOutput);
+    return finishTranscript(text, detectedLanguage, this.options);
   }
 
   reset(): void {
@@ -98,7 +102,10 @@ class TranscribeCppDictationStream implements DictationStream {
   }
 }
 
-/** A reusable loaded transcribe.cpp model. Calls must be scheduled sequentially. */
+/**
+ * A reusable loaded transcribe.cpp model: an ASR model, or the language
+ * detector. Calls must be scheduled sequentially.
+ */
 export class TranscribeCppBackend {
   private model: TranscribeModel | undefined;
   private loading: Promise<TranscribeModel> | undefined;
@@ -151,8 +158,7 @@ export class TranscribeCppBackend {
       return new TranscribeCppDictationStream(
         session,
         stream,
-        options.language,
-        options.chineseOutput ?? "simplified",
+        options,
       );
     } catch (error) {
       session.dispose();
@@ -177,9 +183,23 @@ export class TranscribeCppBackend {
     return finishTranscript(
       result.text,
       result.language,
-      options.language,
-      options.chineseOutput ?? "simplified",
+      options,
     );
+  }
+
+  /** Rank `allowed` detector labels for one clip (a "langid" model only). */
+  async identifyLanguage(
+    pcm: Float32Array,
+    allowed: readonly string[],
+    signal?: AbortSignal,
+  ): Promise<LangIdResult> {
+    await this.prepare();
+    const session = this.model!.createLangIdSession();
+    try {
+      return await session.run(pcm, { allowed, signal });
+    } finally {
+      session.dispose();
+    }
   }
 
   async dispose(): Promise<void> {

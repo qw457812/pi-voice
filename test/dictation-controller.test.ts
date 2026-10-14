@@ -187,7 +187,7 @@ test("controller disposal resets streams and leaves the injected service usable"
   await controller.start(settings);
   await controller.dispose();
   assert.ok(resets > 0);
-  assert.equal(await service.transcribeFile(settings, Float32Array.of(1)), "file text");
+  assert.equal((await service.transcribeFile(settings, Float32Array.of(1))).text, "file text");
   await service.shutdown();
 });
 

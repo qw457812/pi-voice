@@ -29,3 +29,13 @@ test("discard removes a partial chunk", () => {
   chunker.flush();
   assert.deepEqual(chunks, []);
 });
+
+test("probabilities travel with their chunk, and only when every piece had them", () => {
+  const chunks: Array<[number, readonly number[] | undefined]> = [];
+  const chunker = new PcmChunker((chunk, probs) => chunks.push([chunk.length, probs]), 4);
+  chunker.push(Float32Array.of(1, 2), [0.1]);
+  chunker.push(Float32Array.of(3, 4), [0.2]);
+  chunker.push(Float32Array.of(5, 6), [0.3]);
+  chunker.push(Float32Array.of(7, 8));
+  assert.deepEqual(chunks, [[4, [0.1, 0.2]], [4, undefined]]);
+});

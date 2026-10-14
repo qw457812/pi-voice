@@ -16,7 +16,7 @@ const token = process.env.HF_TOKEN?.trim();
 const additionalFetchHeaders = token ? { Authorization: `Bearer ${token}` } : undefined;
 let failures = 0;
 
-for (const model of catalog.models) {
+for (const model of [...catalog.models, catalog.languageDetector]) {
   const url = `https://huggingface.co/${model.repository}/resolve/${model.revision}/${encodeURIComponent(model.filename)}`;
   try {
     const { metadata } = await gguf(url, { additionalFetchHeaders });

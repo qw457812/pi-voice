@@ -33,6 +33,23 @@ export function isChineseLanguage(language: string): boolean {
   return base === "zh" || base === "yue";
 }
 
+const HAN = /\p{Script=Han}/u;
+const KANA = /[\p{Script=Hiragana}\p{Script=Katakana}]/u;
+
+/**
+ * Whether a transcript gets the Chinese script preference. The text decides,
+ * not language detection: on short clips the detector often says English for
+ * Mandarin, which used to leave the model's Simplified output unconverted.
+ * Kana means Japanese, whose kanji OpenCC would mangle (学→學, 図書館→图书馆).
+ */
+export function shouldConvertChinese(
+  text: string,
+  { chineseEnabled, language }: { chineseEnabled: boolean; language: string },
+): boolean {
+  if (!HAN.test(text) || KANA.test(text)) return false;
+  return chineseEnabled || isChineseLanguage(language);
+}
+
 export async function convertChineseOutput(
   text: string,
   output: ChineseOutput,

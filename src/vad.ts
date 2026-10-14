@@ -2,7 +2,8 @@ import { fileURLToPath } from "node:url";
 import type { TranscribeModel } from "transcribe-cpp";
 import { CAPTURE_CHUNK_SAMPLES, CAPTURE_SAMPLE_RATE } from "./audio-constants.js";
 import { getCatalogModel } from "./catalog.js";
-import type { SpeechFilter } from "./dictation-controller.js";
+import { chunksTranscription } from "./chunking.js";
+import type { OnSpeech, SpeechFilter } from "./dictation-controller.js";
 import { describeError, log } from "./log.js";
 import type { TranscribeSettings } from "./settings.js";
 import { loadTranscribeCpp } from "./termux-native.js";
@@ -32,11 +33,11 @@ function concat(pieces: readonly Float32Array[]): Float32Array {
   return out;
 }
 
-type BufferedFrame = { samples: Float32Array; emitted: boolean };
+type BufferedFrame<T> = { frame: T; emitted: boolean };
 
 // Handy's SmoothedVad
-export class SpeechGate {
-  private readonly buffer: BufferedFrame[] = [];
+export class SpeechGate<T = Float32Array> {
+  private readonly buffer: BufferedFrame<T>[] = [];
   private hangover = 0;
   private onset = 0;
   private speaking = false;
@@ -46,9 +47,9 @@ export class SpeechGate {
   get inSpeech(): boolean { return this.speaking; }
 
   /** The frames to keep now, in order. */
-  push(samples: Float32Array, voiced: boolean): Float32Array[] {
-    const frame: BufferedFrame = { samples, emitted: false };
-    this.buffer.push(frame);
+  push(frame: T, voiced: boolean): T[] {
+    const buffered: BufferedFrame<T> = { frame, emitted: false };
+    this.buffer.push(buffered);
     while (this.buffer.length > this.options.prefillFrames + 1) this.buffer.shift();
 
     if (!this.speaking) {
@@ -69,21 +70,21 @@ export class SpeechGate {
       this.speaking = false;
       return [];
     }
-    frame.emitted = true;
-    return [samples];
+    buffered.emitted = true;
+    return [frame];
   }
 
-  takeWithheld(): Float32Array[] {
-    const out: Float32Array[] = [];
-    for (const frame of this.buffer) {
-      if (frame.emitted) continue;
-      frame.emitted = true;
-      out.push(frame.samples);
+  takeWithheld(): T[] {
+    const out: T[] = [];
+    for (const buffered of this.buffer) {
+      if (buffered.emitted) continue;
+      buffered.emitted = true;
+      out.push(buffered.frame);
     }
     return out;
   }
 
-  finish(): Float32Array[] {
+  finish(): T[] {
     return this.onset > 0 ? this.takeWithheld() : [];
   }
 }
@@ -96,10 +97,15 @@ export type VadScorer = {
 type VoiceActivityFilterOptions = {
   /** Opened on the first audio. */
   openScorer: () => Promise<VadScorer>;
-  /** Receives kept audio, in order, as soon as it is decided. */
-  onSpeech: (chunk: Float32Array) => void;
+  /** Receives kept audio, in order, as soon as it is decided, with its frame probabilities. */
+  onSpeech: OnSpeech;
   hangoverMs: number;
+  /** False keeps every frame: the probabilities are still wanted, to cut chunks. */
+  dropSilence?: boolean;
 };
+
+/** A frame and its speech probability; undefined once the detector failed. */
+type ScoredFrame = { samples: Float32Array; prob?: number };
 
 /**
  * One recording's VAD. Each pushed chunk is one frame; scoring is async, so
@@ -107,7 +113,8 @@ type VoiceActivityFilterOptions = {
  * yet dropped is lost and the rest of the recording passes through.
  */
 export class VoiceActivityFilter implements SpeechFilter {
-  private readonly gate: SpeechGate;
+  private readonly gate: SpeechGate<ScoredFrame>;
+  private readonly dropSilence: boolean;
   private readonly pending: Float32Array[] = [];
   private readonly kept: Float32Array[] = [];
   private recordedSamples = 0;
@@ -118,6 +125,7 @@ export class VoiceActivityFilter implements SpeechFilter {
   private discarded = false;
 
   constructor(private readonly options: VoiceActivityFilterOptions) {
+    this.dropSilence = options.dropSilence ?? true;
     this.gate = new SpeechGate({
       prefillFrames: framesFor(PREFILL_MS),
       onsetFrames: framesFor(ONSET_MS),
@@ -175,24 +183,26 @@ export class VoiceActivityFilter implements SpeechFilter {
       const frame = this.pending.shift()!;
       this.recordedSamples += frame.length;
       if (this.failed) {
-        this.keep([frame]);
+        this.keep([{ samples: frame }]);
         continue;
       }
-      // Only a recording's last chunk is short; it follows the current decision.
+      // Only a recording's last chunk is short; it follows the current
+      // decision and has no probability of its own.
       if (frame.length < CAPTURE_CHUNK_SAMPLES) {
-        if (this.gate.inSpeech) this.keep([frame]);
+        if (this.gate.inSpeech || !this.dropSilence) this.keep([{ samples: frame }]);
         continue;
       }
-      let probability: number;
+      let prob: number;
       try {
-        probability = await this.scorer!.score(frame);
+        prob = await this.scorer!.score(frame);
       } catch (error) {
         this.fail(error);
-        this.keep([frame]);
+        this.keep([{ samples: frame }]);
         continue;
       }
       if (this.discarded) return;
-      this.keep(this.gate.push(frame, probability > THRESHOLD));
+      const scored = { samples: frame, prob };
+      this.keep(this.dropSilence ? this.gate.push(scored, prob > THRESHOLD) : [scored]);
     }
   }
 
@@ -204,11 +214,13 @@ export class VoiceActivityFilter implements SpeechFilter {
     this.release();
   }
 
-  private keep(frames: Float32Array[]): void {
+  private keep(frames: ScoredFrame[]): void {
     if (frames.length === 0 || this.discarded) return;
-    const chunk = concat(frames);
+    const chunk = concat(frames.map((frame) => frame.samples));
     this.kept.push(chunk);
-    try { this.options.onSpeech(chunk); } catch { /* Still in the final transcript. */ }
+    const whole = frames.filter((frame) => frame.samples.length === CAPTURE_CHUNK_SAMPLES);
+    const probs = whole.every((frame) => frame.prob !== undefined) ? whole.map((frame) => frame.prob!) : undefined;
+    try { this.options.onSpeech(chunk, probs); } catch { /* Still in the final transcript. */ }
   }
 
   private release(): void {
@@ -222,27 +234,46 @@ export class VoiceActivityDetection {
   private model: Promise<TranscribeModel> | undefined;
   private disposed = false;
 
-  /** Undefined when the setting is off. */
-  createFilter(settings: TranscribeSettings, onSpeech: (chunk: Float32Array) => void): SpeechFilter | undefined {
-    if (!settings.voiceActivityDetection || this.disposed) return undefined;
+  /**
+   * Undefined when the setting is off, unless the model is chunked: then
+   * every frame is kept, but scored for the chunk cuts.
+   */
+  createFilter(settings: TranscribeSettings, onSpeech: OnSpeech): SpeechFilter | undefined {
+    const chunked = chunksTranscription(settings);
+    if ((!settings.voiceActivityDetection && !chunked) || this.disposed) return undefined;
     const streaming = getCatalogModel(settings.model.id)?.capabilities.streaming ?? false;
     return new VoiceActivityFilter({
       openScorer: () => this.openScorer(),
       onSpeech,
       hangoverMs: streaming ? STREAMING_HANGOVER_MS : OFFLINE_HANGOVER_MS,
+      dropSilence: settings.voiceActivityDetection,
     });
   }
 
-  private async openScorer(): Promise<VadScorer> {
+  /** Silero's probability for each 512-sample frame of a whole clip (the last zero padded). */
+  async scoreClip(pcm: Float32Array, signal?: AbortSignal): Promise<number[]> {
+    const session = (await this.loaded()).createVadSession();
+    try {
+      return (await session.run(pcm, { signal })).probs;
+    } finally {
+      session.dispose();
+    }
+  }
+
+  private async loaded(): Promise<TranscribeModel> {
     if (this.disposed) throw new Error("Pi Voice is shutting down");
-    // A failed load is retried by the next recording.
+    // A failed load is retried by the next use.
     const loading = (this.model ??= loadModel().catch((error: unknown) => {
       this.model = undefined;
       throw error;
     }));
     const model = await loading;
     if (this.disposed) throw new Error("Pi Voice is shutting down");
-    const session = model.createVadSession({ nThreads: 1 });
+    return model;
+  }
+
+  private async openScorer(): Promise<VadScorer> {
+    const session = (await this.loaded()).createVadSession({ nThreads: 1 });
     return {
       async score(frame) {
         const { probs } = await session.streamFeed(frame);

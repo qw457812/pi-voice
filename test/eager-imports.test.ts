@@ -10,7 +10,7 @@ import test from "node:test";
 const NATIVE_OR_TUI = ["audio", "transcription", "visualizer", "file-audio"];
 const BOUNDARIES: Record<string, string[]> = {
   index: ["runtime", ...NATIVE_OR_TUI],
-  runtime: NATIVE_OR_TUI,
+  runtime: [...NATIVE_OR_TUI, "models"],
   vad: ["transcription"],
 };
 

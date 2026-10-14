@@ -15,7 +15,7 @@
       "accuracy": {
         "en": {"error": 3.99, "ciLower": 3.6}
       },
-      "performance": {"accelerated": 12.5, "cpu": 7.5}
+      "performance": {"accelerated": 25.28, "cpu": 13.955}
     },
     "nemotron-3.5-asr-streaming-0.6b": {
       "accuracy": {
@@ -48,7 +48,7 @@
         "vi": {"error": 13.96, "ciLower": 13.09},
         "zh": {"error": 18.87, "ciLower": 17.82}
       },
-      "performance": {"accelerated": 14.5, "cpu": 7.5}
+      "performance": {"accelerated": 17.135, "cpu": 10.59}
     },
     "canary-180m-flash": {
       "accuracy": {
@@ -57,7 +57,7 @@
         "es": {"error": 6.54, "ciLower": 5.92},
         "fr": {"error": 8.53, "ciLower": 7.78}
       },
-      "performance": {"accelerated": 31.9, "cpu": 21.3}
+      "performance": {"accelerated": 33.085, "cpu": 21.73}
     },
     "cohere-transcribe-03-2026": {
       "accuracy": {
@@ -76,7 +76,7 @@
         "vi": {"error": 7.39, "ciLower": 6.8},
         "zh": {"error": 11.18, "ciLower": 10.19}
       },
-      "performance": {"accelerated": 8, "cpu": 3}
+      "performance": {"accelerated": 8.095, "cpu": 4.31}
     },
     "whisper-medium": {
       "accuracy": {
@@ -114,6 +114,7 @@
         "is": {"error": 51.6, "ciLower": 47.14},
         "it": {"error": 4.17, "ciLower": 3.75},
         "ja": {"error": 7.35, "ciLower": 6.79},
+        "jv": {"error": 73.01, "ciLower": 71.38},
         "ka": {"error": 128.01, "ciLower": 123.78},
         "kk": {"error": 53.09, "ciLower": 51.93},
         "km": {"error": 108.92, "ciLower": 106.01},
@@ -162,7 +163,7 @@
         "yo": {"error": 109, "ciLower": 106.23},
         "zh": {"error": 13.13, "ciLower": 11.97}
       },
-      "performance": {"accelerated": 4.35, "cpu": 1.05}
+      "performance": {"accelerated": 4.085, "cpu": 1.925}
     },
     "Voxtral-Mini-4B-Realtime-2602": {
       "accuracy": {
@@ -180,7 +181,37 @@
         "ru": {"error": 5.41, "ciLower": 4.95},
         "zh": {"error": 10.41, "ciLower": 9.32}
       },
-      "performance": {"accelerated": 0.885, "cpu": 0.585}
+      "performance": {"accelerated": 0.76, "cpu": 0.585}
+    },
+    "parakeet-ultra": {
+      "accuracy": {
+        "bg": {"error": 11.04, "ciLower": 10.32},
+        "cs": {"error": 11.04, "ciLower": 10.21},
+        "da": {"error": 15.98, "ciLower": 15.28},
+        "de": {"error": 4.58, "ciLower": 4.17},
+        "el": {"error": 32.25, "ciLower": 31.18},
+        "en": {"error": 4.26, "ciLower": 3.84},
+        "es": {"error": 3.06, "ciLower": 2.75},
+        "et": {"error": 14.44, "ciLower": 13.68},
+        "fi": {"error": 11.14, "ciLower": 10.44},
+        "fr": {"error": 4.66, "ciLower": 4.21},
+        "hr": {"error": 11.3, "ciLower": 10.55},
+        "hu": {"error": 13.09, "ciLower": 12.41},
+        "it": {"error": 2.34, "ciLower": 2.07},
+        "lt": {"error": 17.06, "ciLower": 16.38},
+        "lv": {"error": 18.04, "ciLower": 17.22},
+        "mt": {"error": 17.01, "ciLower": 16.28},
+        "nl": {"error": 6.7, "ciLower": 5.99},
+        "pl": {"error": 6.16, "ciLower": 5.64},
+        "pt": {"error": 4.16, "ciLower": 3.71},
+        "ro": {"error": 10.12, "ciLower": 9.48},
+        "ru": {"error": 5.63, "ciLower": 5.2},
+        "sk": {"error": 7.83, "ciLower": 7.17},
+        "sl": {"error": 18.98, "ciLower": 18.08},
+        "sv": {"error": 12.83, "ciLower": 12.09},
+        "uk": {"error": 5.71, "ciLower": 5.2}
+      },
+      "performance": {"accelerated": 23, "cpu": 13.29}
     },
     "parakeet-tdt-0.6b-v3": {
       "accuracy": {
@@ -210,13 +241,13 @@
         "sv": {"error": 15.25, "ciLower": 14.38},
         "uk": {"error": 6.84, "ciLower": 6.25}
       },
-      "performance": {"accelerated": 12.5, "cpu": 7.5}
+      "performance": {"accelerated": 25.065, "cpu": 13.655}
     },
     "parakeet-tdt-0.6b-v2": {
       "accuracy": {
         "en": {"error": 4.11, "ciLower": 3.71}
       },
-      "performance": {"accelerated": 15, "cpu": 8}
+      "performance": {"accelerated": 27.435, "cpu": 14.27}
     },
     "Qwen3-ASR-0.6B": {
       "accuracy": {
@@ -251,7 +282,7 @@
         "yue": {"error": 7.91, "ciLower": 7.28},
         "zh": {"error": 7.57, "ciLower": 6.7}
       },
-      "performance": {"accelerated": 8, "cpu": 4.35}
+      "performance": {"accelerated": 9.705, "cpu": 5.295}
     },
     "Fun-ASR-MLT-Nano-2512": {
       "accuracy": {
@@ -287,7 +318,7 @@
         "yue": {"error": 12.72, "ciLower": 11.82},
         "zh": {"error": 8.64, "ciLower": 7.7}
       },
-      "performance": {"accelerated": 9, "cpu": 4.5}
+      "performance": {"accelerated": 8.835, "cpu": 5.47}
     },
     "canary-1b-v2": {
       "accuracy": {
@@ -317,20 +348,20 @@
         "sv": {"error": 9.74, "ciLower": 9.06},
         "uk": {"error": 10.58, "ciLower": 9.87}
       },
-      "performance": {"accelerated": 13.2, "cpu": 6.65}
+      "performance": {"accelerated": 14.13, "cpu": 8.325}
     },
     "canary-qwen-2.5b": {
       "accuracy": {
         "en": {"error": 3.58, "ciLower": 3.19}
       },
-      "performance": {"accelerated": 4.1, "cpu": 2.1}
+      "performance": {"accelerated": 3.975, "cpu": 2.51}
     },
     "cohere-transcribe-arabic-07-2026": {
       "accuracy": {
         "ar": {"error": 11.06, "ciLower": 9.62},
         "en": {"error": 4.88, "ciLower": 4.25}
       },
-      "performance": {"accelerated": 8, "cpu": 3}
+      "performance": {"accelerated": 8.305, "cpu": 4.31}
     },
     "Fun-ASR-Nano-2512": {
       "accuracy": {
@@ -338,19 +369,25 @@
         "ja": {"error": 8.5, "ciLower": 7.86},
         "zh": {"error": 8.59, "ciLower": 7.59}
       },
-      "performance": {"accelerated": 10.5, "cpu": 6.5}
+      "performance": {"accelerated": 10.73, "cpu": 7.945}
     },
     "gigaam-v3-e2e-ctc": {
       "accuracy": {
         "ru": {"error": 5.53, "ciLower": 5.01}
       },
-      "performance": {"accelerated": 30, "cpu": 9}
+      "performance": {"accelerated": 35.375, "cpu": 11.455}
     },
     "gigaam-v3-e2e-rnnt": {
       "accuracy": {
         "ru": {"error": 5.35, "ciLower": 4.85}
       },
-      "performance": {"accelerated": 22, "cpu": 8}
+      "performance": {"accelerated": 15.02, "cpu": 7.875}
+    },
+    "granite-speech-5.0-470m-turboctc": {
+      "accuracy": {
+        "en": {"error": 4.61, "ciLower": 4.19}
+      },
+      "performance": {"accelerated": 22.865, "cpu": 17.24}
     },
     "granite-speech-4.1-2b": {
       "accuracy": {
@@ -361,25 +398,25 @@
         "ja": {"error": 6.3, "ciLower": 5.75},
         "pt": {"error": 9.8, "ciLower": 9.08}
       },
-      "performance": {"accelerated": 2.8, "cpu": 1.45}
+      "performance": {"accelerated": 4.615, "cpu": 2.775}
     },
     "medasr": {
       "accuracy": {
         "en": {"error": 37.48, "ciLower": 35.83}
       },
-      "performance": {"accelerated": 71, "cpu": 19.5}
+      "performance": {"accelerated": 71.26, "cpu": 25.865}
     },
     "parakeet-tdt_ctc-110m": {
       "accuracy": {
         "en": {"error": 6.11, "ciLower": 5.59}
       },
-      "performance": {"accelerated": 32.5, "cpu": 23.5}
+      "performance": {"accelerated": 76.455, "cpu": 50.03}
     },
     "multitalker-parakeet-streaming-0.6b-v1": {
       "accuracy": {
         "en": {"error": 6.52, "ciLower": 5.95}
       },
-      "performance": {"accelerated": 25, "cpu": 13.5}
+      "performance": {"accelerated": 26.345, "cpu": 13.415}
     },
     "Qwen3-ASR-1.7B": {
       "accuracy": {
@@ -414,7 +451,7 @@
         "yue": {"error": 6.13, "ciLower": 5.55},
         "zh": {"error": 7.14, "ciLower": 6.26}
       },
-      "performance": {"accelerated": 3.85, "cpu": 2}
+      "performance": {"accelerated": 4.085, "cpu": 2.47}
     },
     "SenseVoiceSmall": {
       "accuracy": {
@@ -424,7 +461,7 @@
         "yue": {"error": 37.44, "ciLower": 36.69},
         "zh": {"error": 10.12, "ciLower": 9.16}
       },
-      "performance": {"accelerated": 32.5, "cpu": 15.5}
+      "performance": {"accelerated": 27.69, "cpu": 19.735}
     },
     "Voxtral-Mini-3B-2507": {
       "accuracy": {
@@ -437,7 +474,7 @@
         "nl": {"error": 6.57, "ciLower": 5.84},
         "pt": {"error": 3.84, "ciLower": 3.44}
       },
-      "performance": {"accelerated": 1.25, "cpu": 0.5}
+      "performance": {"accelerated": 1.085, "cpu": 0.56}
     },
     "whisper-small": {
       "accuracy": {
@@ -475,6 +512,7 @@
         "is": {"error": 74.54, "ciLower": 69.87},
         "it": {"error": 7.97, "ciLower": 7.4},
         "ja": {"error": 12.81, "ciLower": 12.05},
+        "jv": {"error": 94.42, "ciLower": 91.78},
         "ka": {"error": 130.64, "ciLower": 125.94},
         "kk": {"error": 73.54, "ciLower": 72.52},
         "km": {"error": 116.96, "ciLower": 113.31},
@@ -523,7 +561,7 @@
         "yo": {"error": 118.5, "ciLower": 114.83},
         "zh": {"error": 23.06, "ciLower": 21.79}
       },
-      "performance": {"accelerated": 12.15, "cpu": 3.4}
+      "performance": {"accelerated": 11.695, "cpu": 5.86}
     },
     "whisper-large-v3-turbo": {
       "accuracy": {
@@ -561,6 +599,7 @@
         "is": {"error": 21.39, "ciLower": 17.91},
         "it": {"error": 2.77, "ciLower": 2.45},
         "ja": {"error": 4.82, "ciLower": 4.4},
+        "jv": {"error": 53.8, "ciLower": 52.56},
         "ka": {"error": 109.21, "ciLower": 107.78},
         "kk": {"error": 21.27, "ciLower": 20.15},
         "km": {"error": 95.2, "ciLower": 93.97},
@@ -610,14 +649,14 @@
         "yue": {"error": 34.62, "ciLower": 33.41},
         "zh": {"error": 8.5, "ciLower": 7.65}
       },
-      "performance": {"accelerated": 3.4, "cpu": 0.75}
+      "performance": {"accelerated": 3.095, "cpu": 1.43}
     },
     "Breeze-ASR-25": {
       "accuracy": {
         "en": {"error": 4.14, "ciLower": 3.7},
         "zh": {"error": 8.1, "ciLower": 7.28}
       },
-      "performance": {"accelerated": 2.15, "cpu": 0.55}
+      "performance": {"accelerated": 2.02, "cpu": 0.96}
     },
     "whisper-large-v3": {
       "accuracy": {
@@ -655,6 +694,7 @@
         "is": {"error": 31.85, "ciLower": 27.47},
         "it": {"error": 2.54, "ciLower": 2.16},
         "ja": {"error": 4.81, "ciLower": 4.25},
+        "jv": {"error": 64.72, "ciLower": 63.4},
         "ka": {"error": 93.97, "ciLower": 93.03},
         "kk": {"error": 33.07, "ciLower": 32.07},
         "km": {"error": 101.09, "ciLower": 99.27},
@@ -704,7 +744,7 @@
         "yue": {"error": 22.06, "ciLower": 20.16},
         "zh": {"error": 7.98, "ciLower": 7.12}
       },
-      "performance": {"accelerated": 2.1, "cpu": 0.55}
+      "performance": {"accelerated": 1.995, "cpu": 0.97}
     }
   }
 }

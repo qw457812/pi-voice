@@ -1,6 +1,6 @@
 import { Deferred } from "../src/deferred.js";
 import type { Capture, CapturedAudio, CaptureSinks, OpenCapture } from "../src/dictation-controller.js";
-import type { DictationReservation } from "../src/transcription-service.js";
+import type { DictationReservation, Transcript } from "../src/transcription-service.js";
 
 /** One recording on a FakeMicrophone. */
 export class FakeCapture implements Capture {
@@ -46,11 +46,11 @@ export class FakeReservation implements DictationReservation {
   pcm: Float32Array | undefined;
   signal: AbortSignal | undefined;
   feed(chunk: Float32Array): void { this.chunks.push(chunk); }
-  submit(pcm: Float32Array, signal?: AbortSignal): Promise<string> {
+  submit(pcm: Float32Array, signal?: AbortSignal): Promise<Transcript> {
     this.submissions++;
     this.pcm = pcm;
     this.signal = signal;
-    return this.result.promise;
+    return this.result.promise.then((text) => ({ text }));
   }
   cancel(): void { if (!this.submissions) this.cancelled++; }
 }

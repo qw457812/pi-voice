@@ -1,6 +1,6 @@
 import type { CatalogModel } from "./catalog.js";
 import type { CatalogModelActivation } from "./model-activation.js";
-import { findCachedCatalogModel, type CachedCatalogModel } from "./models.js";
+import { findCachedCatalogModel, pendingDownloads, type CachedCatalogModel } from "./models.js";
 
 export type DownloadState = {
   readonly model: CatalogModel;
@@ -94,7 +94,8 @@ export class ModelSelectionController<R> {
   select(model: CatalogModel): void {
     if (!this.acceptsInput || this.download) return;
     const cached = this.cachedById.get(model.id);
-    if (!this.target && cached && model.id === this.committedModelId &&
+    const downloads = pendingDownloads(model, Boolean(cached)).length > 0;
+    if (!downloads && !this.target && model.id === this.committedModelId &&
         (this.selectedDuringSession || !this.options.advance)) {
       this.selectedDuringSession = true;
       if (this.options.advance) this.finish(this.options.completion);
@@ -107,9 +108,9 @@ export class ModelSelectionController<R> {
     this.target = target;
     this.feedback = undefined;
     this.samples = [];
-    this.download = cached ? undefined : {
+    this.download = downloads ? {
       model, downloaded: 0, total: 0, message: "Connecting to Hugging Face…",
-    };
+    } : undefined;
     this.changed();
 
     // Catch synchronous implementations too. The real pipeline reports only
@@ -119,15 +120,15 @@ export class ModelSelectionController<R> {
       work = this.activate(model, {
         cached,
         signal: target.controller.signal,
-        onProgress: ({ downloaded, total }) => {
+        onProgress: ({ downloaded, total, message }) => {
           if (this.disposed || this.closed || this.target !== target || target.controller.signal.aborted) return;
           if (!this.download) return;
           const firstReport = this.download.total === 0 && total > 0;
           this.download = {
             model, downloaded, total,
-            message: firstReport
+            message: message ?? (firstReport
               ? downloaded > 0 ? "Resuming download from Hugging Face…" : "Downloading from Hugging Face…"
-              : this.download.message,
+              : this.download.message),
           };
           this.samples.push({ time: this.now(), bytes: downloaded });
           if (this.samples.length > 64) this.samples.shift();
@@ -147,9 +148,13 @@ export class ModelSelectionController<R> {
         if (this.target !== target) { this.changed(); return; }
         this.target = undefined;
         this.download = undefined;
-        this.feedback = cached ? undefined : {
+        // A failed detector download still selects the model; its own warning explains.
+        const detectorDownloaded = cached && !pendingDownloads(model, true).length;
+        this.feedback = !cached ? {
           type: "success", text: `✓ Downloaded and selected ${model.name}`,
-        };
+        } : detectorDownloaded && downloads ? {
+          type: "success", text: `✓ Selected ${model.name} and downloaded the language detector`,
+        } : undefined;
         if (this.pendingExit) this.finish(this.pendingExit.result);
         else if (this.options.advance) this.finish(this.options.completion);
         else this.changed();

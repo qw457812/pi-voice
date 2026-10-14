@@ -66,8 +66,8 @@ export function createPiVoiceRuntime(
   let settingsWarningShown = false;
   let audioModulePromise: Promise<typeof import("./audio.js")> | undefined;
   let visualizerModulePromise: Promise<typeof import("./visualizer.js")> | undefined;
-  const transcriptionService = new TranscriptionService();
   const voiceActivity = new VoiceActivityDetection();
+  const transcriptionService = new TranscriptionService(undefined, (pcm, signal) => voiceActivity.scoreClip(pcm, signal));
 
   function loadAudio(): Promise<typeof import("./audio.js")> {
     return (audioModulePromise ??= import("./audio.js"));
@@ -148,6 +148,7 @@ export function createPiVoiceRuntime(
       currentModelId: previous.model.id,
       microphone: previous.microphone,
       voiceActivityDetection: previous.voiceActivityDetection,
+      longformChunking: previous.longformChunking,
       postActivation: "advance",
     });
     if (configured) rememberSettings(configured);
@@ -293,6 +294,7 @@ export function createPiVoiceRuntime(
     try {
       const result = await active.dictation.stop();
       if (shuttingDown) return;
+      if (result?.warning) ctx.ui.notify(result.warning, "warning");
       if (!result) {
         await reportDictationError(ctx, active.dictation);
       } else if (result.text) {

@@ -1,4 +1,21 @@
+import { LANGUAGE_DETECTION_MODEL, displayLanguage, getCatalogModel } from "./catalog.js";
+import { isChineseLanguage } from "./chinese.js";
+import {
+  ChunkedDictationStream,
+  ChunkedTranscriber,
+  chunksTranscription,
+  MAX_CHUNK_SAMPLES,
+  type ChunkDecoder,
+} from "./chunking.js";
 import { Deferred } from "./deferred.js";
+import {
+  detectLanguage,
+  missingDetectorWarning,
+  settingsLanguagePolicy,
+  undetectablePreferences,
+  type AutoLanguagePolicy,
+} from "./language-detection-policy.js";
+import { describeError, log } from "./log.js";
 import type { TranscribeSettings } from "./settings.js";
 import type {
   DictationStream,
@@ -6,11 +23,24 @@ import type {
   TranscriptionOptions,
 } from "./transcription.js";
 
+/** A transcript, plus any language identification fallback or limitation. */
+export type Transcript = { text: string; warning?: string };
+
+/** Silero's probability for each 512-sample frame of a whole clip. */
+export type ClipScorer = (pcm: Float32Array, signal: AbortSignal) => Promise<readonly number[]>;
+
+/** Audio fed during recording, with its Silero frame probabilities when it has them. */
+type FedChunk = { pcm: Float32Array; probs?: readonly number[] };
+
+/** Decodes a take's audio in the language chosen from its start, once. */
+type TakeDecoder = { decode: ChunkDecoder; readonly warning: string | undefined };
+
 type TranscriptionJob = {
   settings: TranscribeSettings;
+  policy: AutoLanguagePolicy;
   pcm: Float32Array;
   signal?: AbortSignal;
-  resolve: (text: string) => void;
+  resolve: (transcript: Transcript) => void;
   reject: (error: unknown) => void;
   started: boolean;
   settled: boolean;
@@ -19,6 +49,7 @@ type TranscriptionJob = {
 
 type ReservationState = {
   settings: TranscribeSettings;
+  policy: AutoLanguagePolicy;
   accepting: boolean;
   submitted: boolean;
   cancelled: boolean;
@@ -27,12 +58,14 @@ type ReservationState = {
   ready: Deferred;
   /** Resolves when recording ends, whether by submit or cancel. */
   submission: Deferred;
-  result: Deferred<string>;
+  result: Deferred<Transcript>;
   fullPcm?: Float32Array;
   signal?: AbortSignal;
   removeAbortListener?: () => void;
-  chunks: Float32Array[];
+  chunks: FedChunk[];
   stream?: DictationStream;
+  /** The take's chunked stream, kept after reset until its decoding settles. */
+  chunked?: { stream: ChunkedDictationStream; decoder: TakeDecoder };
   drain?: Promise<void>;
   streamUnavailable: boolean;
   streamError?: unknown;
@@ -40,8 +73,8 @@ type ReservationState = {
 
 export type DictationReservation = {
   readonly ready: Promise<void>;
-  feed(chunk: Float32Array): void;
-  submit(pcm: Float32Array, signal?: AbortSignal): Promise<string>;
+  feed(chunk: Float32Array, probs?: readonly number[]): void;
+  submit(pcm: Float32Array, signal?: AbortSignal): Promise<Transcript>;
   cancel(): void;
 };
 
@@ -52,6 +85,7 @@ type ReusableBackend = Pick<
   startStream?: (
     options?: TranscriptionOptions,
   ) => Promise<DictationStream | undefined>;
+  identifyLanguage?: TranscribeCppBackend["identifyLanguage"];
 };
 
 type BackendFactory = (
@@ -68,16 +102,26 @@ function cancellationError(state: ReservationState): Error {
 
 function transcriptionOptions(
   settings: TranscribeSettings,
+  language: string | undefined,
   signal?: AbortSignal,
 ): TranscriptionOptions {
   return {
     signal,
-    language:
-      settings.transcriptionLanguage === "auto"
-        ? undefined
-        : settings.transcriptionLanguage,
+    language,
     chineseOutput: settings.chineseOutput,
+    chineseEnabled: isChineseLanguage(settings.transcriptionLanguage) ||
+      settings.preferredLanguages.some(isChineseLanguage),
   };
+}
+
+function fixedLanguage(policy: AutoLanguagePolicy): string | undefined {
+  return policy.kind === "fixed" ? policy.language : undefined;
+}
+
+async function cachedDetectorPath(): Promise<string | undefined> {
+  // Keeps Hugging Face modules off the path of every other take.
+  const { findCachedCatalogModel } = await import("./models.js");
+  return findCachedCatalogModel(LANGUAGE_DETECTION_MODEL)?.path;
 }
 
 /** Owns the loaded model and schedules dictation ahead of queued file jobs. */
@@ -91,27 +135,36 @@ export class TranscriptionService {
   private loop: Promise<void> | undefined;
   private shuttingDown = false;
   private readonly shutdownController = new AbortController();
+  /** The language detector, loaded on demand like the transcription model. */
+  private detector: ReusableBackend | undefined;
+  private detectorLoading: Promise<ReusableBackend> | undefined;
+  /** A missing detector warns on the first take only, not every take. */
+  private missingDetectorWarned = false;
 
   constructor(
     private readonly createBackend: BackendFactory = async (modelPath) => {
       const { TranscribeCppBackend } = await import("./transcription.js");
       return new TranscribeCppBackend(modelPath);
     },
+    /** Scores long clips for chunking; without it they decode in one piece. */
+    private readonly scoreClip?: ClipScorer,
   ) {}
 
   reserveDictation(settings: TranscribeSettings): DictationReservation {
     if (this.shuttingDown) throw new Error("Pi Voice is shutting down");
     if (this.reservation) throw new Error("A dictation reservation is already active");
 
+    const policy = settingsLanguagePolicy(settings);
     const state: ReservationState = {
       settings,
+      policy,
       accepting: true,
       submitted: false,
       cancelled: false,
       started: false,
       ready: new Deferred(),
       submission: new Deferred(),
-      result: new Deferred<string>(),
+      result: new Deferred<Transcript>(),
       chunks: [],
       streamUnavailable: false,
     };
@@ -124,14 +177,14 @@ export class TranscriptionService {
 
     return {
       ready: state.ready.promise,
-      feed: (chunk) => {
+      feed: (chunk, probs) => {
         if (
           !state.accepting ||
           state.streamUnavailable ||
           state.streamError !== undefined ||
           chunk.length === 0
         ) return;
-        state.chunks.push(chunk);
+        state.chunks.push({ pcm: chunk, probs });
         this.startDrain(state);
       },
       submit: (pcm, signal) => {
@@ -173,13 +226,14 @@ export class TranscriptionService {
     settings: TranscribeSettings,
     pcm: Float32Array,
     signal?: AbortSignal,
-  ): Promise<string> {
+  ): Promise<Transcript> {
     if (this.shuttingDown) return Promise.reject(new Error("Pi Voice is shutting down"));
     if (signal?.aborted) return Promise.reject(abortError(signal));
 
-    const result = new Promise<string>((resolve, reject) => {
+    const result = new Promise<Transcript>((resolve, reject) => {
       const job: TranscriptionJob = {
         settings,
+        policy: settingsLanguagePolicy(settings),
         pcm,
         signal,
         resolve,
@@ -260,7 +314,7 @@ export class TranscriptionService {
     ) {
       const chunk = state.chunks.shift()!;
       try {
-        await stream.feed(chunk);
+        await stream.feed(chunk.pcm, chunk.probs);
       } catch (error) {
         state.streamError = error;
         state.chunks.length = 0;
@@ -322,8 +376,7 @@ export class TranscriptionService {
         continue;
       }
 
-      // A dispose failure here would otherwise reject the loop promise unobserved.
-      await this.unloadModel().catch(() => undefined);
+      await this.unloadAll();
       return;
     }
   }
@@ -332,6 +385,8 @@ export class TranscriptionService {
     try {
       await this.runReservationWork(state);
     } finally {
+      // A reset chunked stream may still be decoding: keep the model until it stops.
+      await state.chunked?.stream.idle();
       state.removeAbortListener?.();
       this.reservationStates.delete(state);
     }
@@ -371,13 +426,20 @@ export class TranscriptionService {
       return;
     }
 
-    // If recording already ended while the model loaded (or while the stream
-    // opened), avoid replaying the complete clip through a newly opened stream
-    // and use the batch path.
-    if (!state.submitted && backend.startStream) {
+    if (chunksTranscription(state.settings)) {
+      // Only buffers until a chunk is due, so a take that already ended still uses it.
+      const abort = new AbortController();
+      const decoder = this.takeDecoder(backend, state.settings, state.policy, this.withShutdown(abort.signal));
+      const stream = new ChunkedDictationStream(decoder.decode, () => abort.abort(cancellationError(state)));
+      state.chunked = { stream, decoder };
+      state.stream = stream;
+    } else if (!state.submitted && !state.streamUnavailable && backend.startStream) {
+      // If recording already ended while the model loaded (or while the stream
+      // opened), avoid replaying the complete clip through a newly opened
+      // stream and use the batch path.
       try {
         const stream = await backend.startStream(
-          transcriptionOptions(state.settings),
+          transcriptionOptions(state.settings, fixedLanguage(state.policy)),
         );
         if (stream && state.submitted) {
           stream.reset();
@@ -402,6 +464,8 @@ export class TranscriptionService {
 
     state.ready.resolve();
     this.startDrain(state);
+    // Warm the detector while the user speaks; a failure resurfaces at detection.
+    if (state.policy.kind === "detect") await this.ensureDetector().catch(() => undefined);
     await state.submission.promise;
 
     if (!state.submitted) {
@@ -423,9 +487,10 @@ export class TranscriptionService {
       // streaming existed, instead of finalizing a stream that was never fed.
       if (stream && state.streamError === undefined && pcm.length > 0) {
         try {
-          const text = await stream.finalize();
+          const text = await stream.finalize(pcm);
           state.signal?.throwIfAborted();
-          state.result.resolve(text);
+          const warning = state.chunked?.stream === stream ? state.chunked.decoder.warning : undefined;
+          state.result.resolve(warning ? { text, warning } : { text });
           return;
         } catch (error) {
           if (state.signal?.aborted) throw abortError(state.signal);
@@ -438,16 +503,18 @@ export class TranscriptionService {
         }
       }
 
-      // Stream setup/feed/finalize failure: reset precedes the batch fallback.
+      // Stream setup/feed/finalize failure: reset precedes the batch fallback,
+      // and a live chunk still decoding must stop before the model is reused.
+      await state.chunked?.stream.idle();
       this.resetStream(state);
       state.chunks.length = 0;
-      const text = await this.transcribeBatch(
+      state.result.resolve(await this.transcribeBatch(
         backend,
         state.settings,
+        state.policy,
         pcm,
         this.withShutdown(state.signal),
-      );
-      state.result.resolve(text);
+      ));
     } catch (error) {
       this.resetStream(state);
       state.result.reject(
@@ -466,11 +533,86 @@ export class TranscriptionService {
   private async transcribeBatch(
     backend: ReusableBackend,
     settings: TranscribeSettings,
+    policy: AutoLanguagePolicy,
     pcm: Float32Array,
     signal: AbortSignal,
-  ): Promise<string> {
+  ): Promise<Transcript> {
     signal.throwIfAborted();
-    return backend.transcribe(pcm, transcriptionOptions(settings, signal));
+    const decoder = this.takeDecoder(backend, settings, policy, signal);
+    let text: string;
+    if (chunksTranscription(settings) && pcm.length > MAX_CHUNK_SAMPLES) {
+      const transcriber = new ChunkedTranscriber(decoder.decode);
+      transcriber.push(pcm, await this.scoreLongClip(pcm, signal));
+      text = await transcriber.finish();
+    } else {
+      text = await decoder.decode(pcm, pcm);
+    }
+    const warning = decoder.warning;
+    return warning ? { text, warning } : { text };
+  }
+
+  /** Scores for a clip too long for one chunk; undefined decodes it in one piece. */
+  private async scoreLongClip(pcm: Float32Array, signal: AbortSignal): Promise<readonly number[] | undefined> {
+    if (!this.scoreClip) {
+      log.warn("no voice activity detection; decoding the clip in one piece");
+      return undefined;
+    }
+    try {
+      return await this.scoreClip(pcm, signal);
+    } catch (error) {
+      signal.throwIfAborted();
+      log.warn(`voice activity detection failed, decoding the clip in one piece: ${describeError(error)}`);
+      return undefined;
+    }
+  }
+
+  /**
+   * A decoder for one take or file: the first chunk chooses the language from
+   * the start of the clip, and every chunk uses it.
+   */
+  private takeDecoder(
+    backend: ReusableBackend,
+    settings: TranscribeSettings,
+    policy: AutoLanguagePolicy,
+    signal: AbortSignal,
+  ): TakeDecoder {
+    let choice: Promise<{ language?: string; warning?: string }> | undefined;
+    let warning: string | undefined;
+    return {
+      decode: async (chunk, clip) => {
+        signal.throwIfAborted();
+        const chosen = await (choice ??= this.chooseLanguage(settings, policy, clip, signal));
+        warning = chosen.warning;
+        signal.throwIfAborted();
+        return backend.transcribe(chunk, transcriptionOptions(settings, chosen.language, signal));
+      },
+      get warning() { return warning; },
+    };
+  }
+
+  private async chooseLanguage(
+    settings: TranscribeSettings,
+    policy: AutoLanguagePolicy,
+    clip: Float32Array,
+    signal: AbortSignal,
+  ): Promise<{ language?: string; warning?: string }> {
+    if (policy.kind === "detect" && !this.detector && !(await cachedDetectorPath())) {
+      const language = policy.languages[0]!;
+      const warning = this.missingDetectorWarned ? undefined : missingDetectorWarning(language);
+      this.missingDetectorWarned = true;
+      return { language, warning };
+    }
+    if (policy.kind === "detect") {
+      return detectLanguage(policy, clip, async (head, allowed) =>
+        (await this.ensureDetector()).identifyLanguage!(head, allowed, signal));
+    }
+    if (policy.kind === "unsupported") {
+      // Settings normalization drops Auto first; this guards stale settings.
+      const skipped = undetectablePreferences(getCatalogModel(settings.model.id)!, settings.preferredLanguages);
+      const which = skipped.length ? ` (${skipped.map(displayLanguage).join(", ")})` : "";
+      throw new Error(`Auto detect doesn't work with your current languages${which}. Choose a language in /voice-settings.`);
+    }
+    return { language: fixedLanguage(policy) };
   }
 
   private async runJob(job: TranscriptionJob): Promise<void> {
@@ -481,11 +623,24 @@ export class TranscriptionService {
     try {
       signal.throwIfAborted();
       const backend = await this.ensureModel(job.settings.model.path);
-      const text = await this.transcribeBatch(backend, job.settings, job.pcm, signal);
-      this.settleJob(job, () => job.resolve(text));
+      const transcript = await this.transcribeBatch(backend, job.settings, job.policy, job.pcm, signal);
+      this.settleJob(job, () => job.resolve(transcript));
     } catch (error) {
       this.settleJob(job, () => job.reject(error));
     }
+  }
+
+  /** Concurrent callers (prewarm, a live chunk) share one load. */
+  private ensureDetector(): Promise<ReusableBackend> {
+    return (this.detectorLoading ??= (async () => {
+      if (!this.detector) {
+        const path = await cachedDetectorPath();
+        if (!path) throw new Error("the language detector isn't downloaded");
+        this.detector = await this.createBackend(path);
+      }
+      await this.detector.prepare();
+      return this.detector;
+    })().finally(() => { this.detectorLoading = undefined; }));
   }
 
   private async ensureModel(modelPath: string): Promise<ReusableBackend> {
@@ -519,6 +674,16 @@ export class TranscriptionService {
     await backend.dispose();
   }
 
+  /** Never rejects: a dispose failure would otherwise go unobserved. */
+  private async unloadAll(): Promise<void> {
+    const detector = this.detector;
+    this.detector = undefined;
+    await Promise.all([
+      this.unloadModel().catch(() => undefined),
+      detector?.dispose().catch(() => undefined),
+    ]);
+  }
+
   async shutdown(): Promise<void> {
     if (!this.shuttingDown) {
       this.shuttingDown = true;
@@ -543,6 +708,6 @@ export class TranscriptionService {
 
     await this.loop?.catch(() => undefined);
     this.reservationStates.clear();
-    await this.unloadModel().catch(() => undefined);
+    await this.unloadAll();
   }
 }

@@ -3,9 +3,10 @@ export function canonicalLanguage(language: string): string {
   return language.trim().toLowerCase().split("-", 1)[0] ?? "";
 }
 
-// Model cards and benchmarks use different ISO codes for these languages.
-// This identity is for matching, never a code to send directly to a backend.
-const LANGUAGE_ALIASES: Readonly<Record<string, string>> = { tl: "fil", no: "nb" };
+// Model cards, benchmarks, and the language detector use different ISO codes
+// for these languages (iw/jw are legacy codes for Hebrew and Javanese). This
+// identity is for matching, never a code to send directly to a backend.
+const LANGUAGE_ALIASES: Readonly<Record<string, string>> = { tl: "fil", no: "nb", iw: "he", jw: "jv" };
 
 export function languageIdentity(language: string): string {
   const base = canonicalLanguage(language);

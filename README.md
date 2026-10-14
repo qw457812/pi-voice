@@ -47,7 +47,7 @@ pi install npm:@earendil-works/pi-voice
 
 ## File transcription and FFmpeg
 
-The agent can call `transcribe_file` for local audio or video files. Decoded audio is limited to 128 MiB (about 35 minutes). File decoding requires the `ffmpeg` executable. Install FFmpeg with your system package manager if you don't already have it installed
+The agent can call `transcribe_file` for local audio or video files. Decoded audio is limited to 512 MiB (about 2.3 hours). File decoding requires the `ffmpeg` executable. Install FFmpeg with your system package manager if you don't already have it installed
 
 ```bash
 # macOS with Homebrew

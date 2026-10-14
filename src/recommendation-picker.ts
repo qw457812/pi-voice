@@ -13,6 +13,8 @@ import {
   formatBinarySize,
 } from "./catalog.js";
 import type { CatalogModelActivation } from "./model-activation.js";
+import { undetectablePreferences } from "./language-detection-policy.js";
+import { autoUnavailableNotice, downloadAction } from "./model-cells.js";
 import { ModelSelectionController } from "./model-selection-controller.js";
 import { VoiceKeys } from "./keybindings.js";
 import {
@@ -202,9 +204,10 @@ export class RecommendedModelPicker extends Container implements Focusable {
       } else {
         text = "A good balance of speed and accuracy.";
       }
-      if (this.languages.length > 1 && recommendation.model.capabilities.languageDetection) {
-        const scope = this.languages.length === 2 ? "both languages" : "all your languages";
-        text += ` It switches between ${scope} automatically.`;
+      // Recommended models support every chosen language, so Auto covers
+      // them all unless the detector cannot identify one.
+      if (this.languages.length > 1 && undetectablePreferences(recommendation.model, this.languages).length === 0) {
+        text += " It detects which language you're speaking automatically.";
       }
       return text;
     }
@@ -272,9 +275,8 @@ export class RecommendedModelPicker extends Container implements Focusable {
         ),
       );
     }
-    if (this.languages.length > 1 && !recommendation.model.capabilities.languageDetection) {
-      details.addChild(new Text(this.theme.fg("warning", "You will need to change the transcription language manually."), LIST_PADDING + 2, 0));
-    }
+    const notice = autoUnavailableNotice(recommendation.model, this.languages);
+    if (notice) details.addChild(new Text(this.theme.fg("warning", notice), LIST_PADDING + 2, 0));
     return details;
   }
 
@@ -387,7 +389,7 @@ export class RecommendedModelPicker extends Container implements Focusable {
     if (!row) return "choose";
     if (row.type !== "model") return this.rowLabel(row).action;
     const model = row.recommendation.model;
-    return this.selection.cachedById.has(model.id) ? "choose" : `download ${formatBinarySize(model.size)}`;
+    return downloadAction(model, this.selection.cachedById.has(model.id));
   }
 
   override render(width: number): string[] {

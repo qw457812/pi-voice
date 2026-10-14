@@ -21,7 +21,8 @@ import {
 } from "node:fs/promises";
 import { dirname, join, relative } from "node:path";
 import type { ReadableStream } from "node:stream/web";
-import type { CatalogModel } from "./catalog.js";
+import { LANGUAGE_DETECTION_MODEL, type CatalogModel } from "./catalog.js";
+import { requiresLanguageDetector } from "./language-detection-policy.js";
 
 function repositoryCacheDirectory(model: CatalogModel): string {
   return join(
@@ -260,4 +261,17 @@ export function findIncompleteDownload(
     // Missing file means no partial download.
   }
   return undefined;
+}
+
+/**
+ * What choosing `model` still has to download: the model unless it is cached,
+ * plus the shared language detector when the model relies on it and it is
+ * not cached either.
+ */
+export function pendingDownloads(model: CatalogModel, modelCached: boolean): CatalogModel[] {
+  const pending = modelCached ? [] : [model];
+  if (requiresLanguageDetector(model) && !findCachedCatalogModel(LANGUAGE_DETECTION_MODEL)) {
+    pending.push(LANGUAGE_DETECTION_MODEL);
+  }
+  return pending;
 }

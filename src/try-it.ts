@@ -152,6 +152,10 @@ export class TryItPane implements Component {
       } else if (needsFasterModel(speechSeconds, transcribeSeconds)) {
         details = fg("warning", `Slow on this machine? Press ${this.keys.keyText("voice.tryIt.model")} to try another model.`);
       }
+      if (state.result.warning) {
+        const warning = fg("warning", state.result.warning);
+        details = details ? `${details}\n${warning}` : warning;
+      }
     } else if (state.phase === "error") {
       activity = fg("error", state.stage === "model" ? "Could not load the model" : state.stage === "capture" ? "Microphone capture failed" : "Transcription failed");
       const message = state.cause instanceof Error ? state.cause.message : String(state.cause);
@@ -304,8 +308,8 @@ export class TryItPane implements Component {
 }
 
 export async function tryVoice(ctx: ExtensionContext, settings: TranscribeSettings): Promise<TryItResult | undefined> {
-  const service = new TranscriptionService();
   const voiceActivity = new VoiceActivityDetection();
+  const service = new TranscriptionService(undefined, (pcm, signal) => voiceActivity.scoreClip(pcm, signal));
   let pane: TryItPane | undefined;
   try {
     return await ctx.ui.custom<TryItResult>((tui, theme, keybindings, done) =>

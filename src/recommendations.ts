@@ -7,6 +7,8 @@ import {
   type CatalogModel,
 } from "./catalog.js";
 
+import { undetectablePreferences } from "./language-detection-policy.js";
+
 export type MachineTier = "accelerated" | "cpu";
 
 export type RecommendationRole = "best" | "fast" | "accurate";
@@ -211,7 +213,7 @@ function scoreModels(
       worstCiLower: accuracyCells[worstIndex]!.ciLower,
       waitSeconds,
       cpuWaitSeconds: cpuXrt ? method.dictationSeconds / cpuXrt : undefined,
-      manual: wanted.length > 1 && !model.capabilities.languageDetection,
+      manual: wanted.length > 1 && undetectablePreferences(model, languages).length > 0,
       score: error + method.waitWeight * Math.max(0, waitSeconds - method.freeWaitSeconds),
     });
   }
@@ -284,7 +286,7 @@ function fallbackRecommendation(
     (model) =>
       wanted.every((language) =>
         modelMatchesRecommendationLanguage(model, language),
-      ) && (wanted.length === 1 || model.capabilities.languageDetection),
+      ) && (wanted.length === 1 || undetectablePreferences(model, languages).length === 0),
   );
   const model = rankCatalogModels(compatible.length ? compatible : models, wanted)[0];
   return model
