@@ -1,6 +1,6 @@
 {
   "name": "@earendil-works/pi-voice",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Local speech-to-text for Pi",
   "type": "module",
   "license": "MIT",
