@@ -6,7 +6,7 @@ import { settingsForModel } from "../src/settings.js";
 import { FakeMicrophone, fakeDictationService } from "./dictation-helper.js";
 import { nextTurn } from "./helpers.js";
 
-const settings = settingsForModel("parakeet-unified-en-0.6b", "/tmp/test-model");
+const settings = settingsForModel("parakeet-unified-en-0.6b", "/tmp/test-model", { shortcut: "ctrl+alt+z" });
 
 test("asynchronous capture startup does not report listening early", async () => {
   const microphone = new FakeMicrophone();

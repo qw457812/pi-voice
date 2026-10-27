@@ -16,14 +16,14 @@ test("a saved ~/model path resolves to the current home without changing the fil
   });
 
   const path = join(directory, "pi-voice.json");
-  const saved = settingsForModel("parakeet-unified-en-0.6b", join("~", ".cache", "model.gguf"));
+  const saved = settingsForModel("parakeet-unified-en-0.6b", join("~", ".cache", "model.gguf"), { shortcut: "ctrl+alt+z" });
   await writeFile(path, `${JSON.stringify(saved, null, 2)}\n`);
   assert.equal((await readSettings()).settings?.model.path, join(homedir(), ".cache", "model.gguf"));
   assert.equal(JSON.parse(await readFile(path, "utf8")).model.path, saved.model.path);
 
   // Only the path's leading home marker is special; leave other paths alone.
   for (const value of ["~other/model.gguf", "/tmp/model.gguf"]) {
-    await writeSettings(settingsForModel("parakeet-unified-en-0.6b", value));
+    await writeSettings(settingsForModel("parakeet-unified-en-0.6b", value, { shortcut: "ctrl+alt+z" }));
     assert.equal((await readSettings()).settings?.model.path, value);
     assert.equal(JSON.parse(await readFile(path, "utf8")).model.path, value);
   }

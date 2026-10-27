@@ -25,7 +25,7 @@ test("the runtime cancel key interrupts microphone startup and removes its liste
   });
   const model = join(directory, "unused-model");
   await writeFile(model, "test fixture; never loaded");
-  await writeSettings(settingsForModel("parakeet-unified-en-0.6b", model));
+  await writeSettings(settingsForModel("parakeet-unified-en-0.6b", model, { shortcut: "ctrl+alt+z" }));
 
   const entered = new Deferred();
   const ready = new Deferred();
